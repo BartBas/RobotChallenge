@@ -21,7 +21,7 @@ env:
 	xargs -a requirements.txt sudo apt install -y
 
 # 3. Standard CMake Build process
-build:
+build: clean
 	mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && cmake .. && make -j$(shell nproc)
 
@@ -32,7 +32,7 @@ run:
 # Clean up build files
 clean:
 	rm -rf $(BUILD_DIR)
-	
+
 lidar-sdk:
 	@if [ ! -d "YDLidar-SDK" ]; then \
 		git clone https://github.com/YDLIDAR/YDLidar-SDK.git; \
