@@ -17,6 +17,7 @@ CamController::CamController(int cameraIndex, int width, int height)
     , useRpiCam(false)
     , streamingEnabled(false)
     , streamPort(8080)
+    , flip180(false)
 {
     redLowerMin = cv::Scalar(0, 100, 100);
     redLowerMax = cv::Scalar(10, 255, 255);
@@ -49,24 +50,41 @@ bool CamController::initialize() {
     return true;
 }
 
+void CamController::setFlip(bool flip) {
+    flip180 = flip;
+}
+
+bool CamController::isFlipped() const {
+    return flip180;
+}
+
 bool CamController::captureFrame() {
     if (useRpiCam) {
-        int frameSize = frameWidth * frameHeight * 3 / 2;
+        int frameSize = frameWidth * frameHeight * 3 / 2; // YUV420
         std::vector<uint8_t> buffer(frameSize);
         
-        size_t bytesRead = fread(buffer.data(), 1, frameSize, cameraStream);
-        
-        if (bytesRead != frameSize) {
-            std::cerr << "Failed to read complete frame from rpicam" << std::endl;
-            return false;
+        // Read complete frame in one go
+        size_t totalRead = 0;
+        while (totalRead < frameSize) {
+            size_t bytesRead = fread(buffer.data() + totalRead, 1, 
+                                    frameSize - totalRead, cameraStream);
+            
+            if (bytesRead == 0) {
+                std::cerr << "Stream ended or error" << std::endl;
+                return false;
+            }
+            
+            totalRead += bytesRead;
         }
         
-        cv::Mat yuvFrame(frameHeight * 3 / 2, frameWidth, CV_8UC1, buffer.data());
-        
-        // Lock for thread safety
         {
             std::lock_guard<std::mutex> lock(frameMutex);
+            cv::Mat yuvFrame(frameHeight * 3 / 2, frameWidth, CV_8UC1, buffer.data());
             cv::cvtColor(yuvFrame, currentFrame, cv::COLOR_YUV2BGR_I420);
+            
+            if (flip180) {
+                cv::flip(currentFrame, currentFrame, -1);
+            }
         }
         
     } else {
@@ -74,6 +92,10 @@ bool CamController::captureFrame() {
         
         if (currentFrame.empty()) {
             return false;
+        }
+        
+        if (flip180) {
+            cv::flip(currentFrame, currentFrame, -1);
         }
     }
     

@@ -60,7 +60,8 @@ public:
     void setRedRangeUpper(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
     bool isOpened() const;
     void release();
-    
+    void setFlip(bool flip);
+    bool isFlipped() const;
     // NEW: Streaming methods
     void enableStreaming(bool enable, int port = 8080);
     bool isStreamingEnabled() const;
@@ -102,6 +103,7 @@ private:
     std::vector<RedObject> findRedObjects();
     Direction analyzeRedObjects();
     void drawVisualization(cv::Mat& frame);
+    bool flip180;
     
     // NEW: Streaming thread function
     void streamingLoop();

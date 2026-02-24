@@ -8,17 +8,14 @@ TARGET = robot_exec
 all: build run
 
 # 1. Install System-level compilers and tools
-Env-Build:
-	sudo apt update
-	sudo apt install -y build-essential cmake git libcamera-dev pkg-config
-	$(MAKE) lidar-sdk
-
-# 2. Install library dependencies (assuming they are apt packages or python tools)
 env:
-	@echo "Installing libraries from requirements.txt..."
-	@# This assumes your requirements.txt contains system package names
-	@# If they are python-based, use: pip install -r requirements.txt --break-system-packages
+	sudo apt update
+	sudo apt install -y --no-install-recommends \
+		build-essential cmake git pkg-config clinfo \
+		libcamera-dev libopencv-dev python3-opencv
 	xargs -a requirements.txt sudo apt install -y
+	$(MAKE) lidar-sdk
+	
 
 # 3. Standard CMake Build process
 build: clean
