@@ -12,7 +12,8 @@ env:
 	sudo apt update
 	sudo apt install -y --no-install-recommends \
 		build-essential cmake git pkg-config clinfo \
-		libcamera-dev libopencv-dev python3-opencv
+		libcamera-dev libopencv-dev python3-opencv \
+		libasio-dev
 	xargs -a requirements.txt sudo apt install -y
 	$(MAKE) lidar-sdk
 	
