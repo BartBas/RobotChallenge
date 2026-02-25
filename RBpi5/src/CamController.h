@@ -18,7 +18,6 @@
 
 class CamController {
 public:
-    // ... existing enums and structs ...
     
     enum class TrackingStrategy {
         LARGEST,
@@ -39,7 +38,6 @@ public:
         int objectCount;
     };
     
-    // ... existing public methods ...
     
     CamController(int cameraIndex = 0, int width = 640, int height = 480);
     ~CamController();
@@ -62,14 +60,14 @@ public:
     void release();
     void setFlip(bool flip);
     bool isFlipped() const;
-    // NEW: Streaming methods
+
+
     void enableStreaming(bool enable, int port = 8080);
     bool isStreamingEnabled() const;
     int getStreamPort() const;
     
 private:
-    // ... existing private members ...
-    
+   
     cv::VideoCapture cap;
     cv::Mat currentFrame;
     cv::Mat redMask;
@@ -91,21 +89,17 @@ private:
     FILE* cameraStream;
     bool useRpiCam;
     
-    // NEW: Streaming members
     std::atomic<bool> streamingEnabled;
     int streamPort;
     std::thread streamThread;
     std::mutex frameMutex;
     cv::Mat streamFrame;
     
-    // Private methods
     void detectRedPixels();
     std::vector<RedObject> findRedObjects();
     Direction analyzeRedObjects();
     void drawVisualization(cv::Mat& frame);
     bool flip180;
-    
-    // NEW: Streaming thread function
     void streamingLoop();
 };
 

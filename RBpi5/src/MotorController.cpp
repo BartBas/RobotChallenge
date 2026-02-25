@@ -1,5 +1,6 @@
 #include "MotorController.h"
 
+// TODO:  Sendcommand (CMD, Direction, Turn, Speed, Grabber)  in 3 24 bits 3chars
 
 MotorController::MotorController(const std::string& portName) {
     // Open the serial port
