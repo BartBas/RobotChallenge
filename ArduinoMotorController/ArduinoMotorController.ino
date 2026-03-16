@@ -31,7 +31,7 @@ void setup() {
   for (int i = 0; i < 4; i++) {
     motors[i] = AFMS.getMotor(i + 1);
     encoders[i] = new QGPMaker_Encoder(i + 1);
-    motors[i]->run(FORWARD);
+    motors[i]->run(LEFT);
     motors[i]->setSpeed(0);
   }
   
