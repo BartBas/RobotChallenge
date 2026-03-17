@@ -44,7 +44,7 @@ std::vector<LidarPoint> LidarController::getLatestScan() {
 
         for (size_t i = 0; i < count; i++) {
             // Now divide by 64 to get actual degrees (YDLidar fixed-point format)
-            float angle = (float)nodes[i].angle / 64.0f;
+            float angle = (float)nodes[i].angle / 128.0f;
             float distance = (float)nodes[i].dist / 1000.0f; // mm to meters
 
             if (distance > 0.12f && distance < 10.0f) {
