@@ -6,7 +6,6 @@
 
 using namespace ydlidar;
 
-// Global driver instance
 YDlidarDriver drv;
 
 LidarController::LidarController(const std::string& port) : portName(port) {}
@@ -25,7 +24,6 @@ bool LidarController::initialize() {
     
     if (IS_OK(op_result)) {
         std::cout << "Lidar: Motor stabilizing..." << std::endl;
-        // Reduced sleep to get data flowing sooner
         std::this_thread::sleep_for(std::chrono::seconds(2));
         return true;
     }
@@ -37,24 +35,22 @@ std::vector<LidarPoint> LidarController::getLatestScan() {
     node_info nodes[1000]; 
     size_t count = 1000;
 
-    // Grab data with a shorter timeout to keep the loop moving
     result_t op_result = drv.grabScanData(nodes, count, 500);
     
     if (IS_OK(op_result) && count > 0) {
-        for (size_t i = 0; i < count; i++) {
-            float distance = (float)nodes[i].dist / 1000.0f; 
-            float angle = nodes[i].angle;
+        // This is the critical call - it sorts nodes and converts angles
+        // to proper 0-360 degree values with a fixed 0° reference point
+        drv.ascendScanData(nodes, count);
 
-            // X4PRO Filter
+        for (size_t i = 0; i < count; i++) {
+            // Now divide by 64 to get actual degrees (YDLidar fixed-point format)
+            float angle = (float)nodes[i].angle / 64.0f;
+            float distance = (float)nodes[i].dist / 1000.0f; // mm to meters
+
             if (distance > 0.12f && distance < 10.0f) {
-                // We use LidarPoint{angle, distance} 
-                // Ensure these match the struct in your .h file!
                 points.push_back({angle, distance});
             }
         }
-    } else {
-        // If it fails, print a debug message so you know WHY the front end is empty
-        // std::cerr << "LiDAR: Failed to grab data or timed out." << std::endl;
     }
     
     return points;

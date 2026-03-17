@@ -3,20 +3,17 @@
 #include <vector>
 #include <mutex>
 
-// Global storage for the latest scan so the web server can access it
 std::vector<LidarPoint> global_scan;
 std::mutex scan_mutex;
 
 int main() {
-    // 1. Initialize Lidar
-    LidarController lidar("/dev/ttyUSB0"); // Change to your actual port
+    LidarController lidar("/dev/ttyUSB0");
     if (!lidar.initialize()) {
         return -1;
     }
 
     crow::SimpleApp app;
 
-    // 2. Background thread to constantly update Lidar data
     std::thread lidar_thread([&]() {
         while (true) {
             auto scan = lidar.getLatestScan();
@@ -28,7 +25,6 @@ int main() {
         }
     });
 
-    // 3. Web Route: Get JSON Data
     CROW_ROUTE(app, "/data")([](){
         crow::json::wvalue x;
         std::lock_guard<std::mutex> lock(scan_mutex);
@@ -39,7 +35,6 @@ int main() {
         return x;
     });
 
-    // 4. Web Route: Radar UI
     CROW_ROUTE(app, "/")([](){
         return "<html><body style='background:#111; color:#0f0; font-family:sans-serif; text-align:center;'>"
                "<h2>Pi 5 Lidar Radar</h2>"
@@ -50,12 +45,16 @@ int main() {
                "  async function update() {"
                "    const r = await fetch('/data'); const data = await r.json();"
                "    ctx.clearRect(0,0,600,600);"
-               "    ctx.strokeStyle='#222'; /* Draw grid */"
+               "    ctx.strokeStyle='#333';"
                "    for(let i=1;i<5;i++){ ctx.beginPath(); ctx.arc(300,300,i*75,0,6.28); ctx.stroke(); }"
+               "    ctx.strokeStyle='#444';"
+               "    ctx.beginPath(); ctx.moveTo(300,0); ctx.lineTo(300,600); ctx.stroke();"
+               "    ctx.beginPath(); ctx.moveTo(0,300); ctx.lineTo(600,300); ctx.stroke();"
                "    data.forEach(p => {"
-               "      const x = 300 + Math.cos(p.a) * p.r * 100;" // 100px = 1 meter
-               "      const y = 300 + Math.sin(p.a) * p.r * 100;"
-               "      ctx.fillStyle = '#0f0'; ctx.fillRect(x,y,3,3);"
+               "      const rad = (p.a - 90) * Math.PI / 180;"
+               "      const x = 300 + Math.cos(rad) * p.r * 100;"
+               "      const y = 300 - Math.sin(rad) * p.r * 100;"
+               "      ctx.fillStyle = '#0f0'; ctx.fillRect(x-1,y-1,3,3);"
                "    });"
                "    requestAnimationFrame(update);"
                "  } update();"
