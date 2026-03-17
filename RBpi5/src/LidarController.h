@@ -3,7 +3,7 @@
 
 #include "CYdLidar.h"
 #include "YDlidarDriver.h"
-#include "ydlidar_protocol.h" // <--- This contains LidarPropModel and YDLIDAR_X4
+#include "ydlidar_protocol.h"
 #include <vector>
 #include <string>
 
@@ -14,14 +14,20 @@ struct LidarPoint {
 
 class LidarController {
 public:
-    LidarController(const std::string& port);
+    // flip = true when the lidar is physically mounted upside-down
+    LidarController(const std::string& port, bool flip = false);
     ~LidarController();
+
     bool initialize();
     std::vector<LidarPoint> getLatestScan();
 
+    void setFlip(bool flip);
+    bool isFlipped() const;
+
 private:
-    CYdLidar laser;
     std::string portName;
+    bool        flipMounted;
+    CYdLidar    laser;
 };
 
 #endif
