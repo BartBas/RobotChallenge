@@ -15,7 +15,7 @@ const int    WEB_PORT        = 8080;   // Dashboard
 const int    STREAM_PORT     = 8081;   // MJPEG stream (CamController)
 const bool   FLIP_CAMERA     = true;
 const bool   FLIP_LIDAR      = false;  // set true when mounted upside-down
-const double MIN_AREA        = 500.0;
+const double MIN_AREA        = 200.0;
 const double DEAD_ON_THRESH  = 5.0;
 const int    CAMWIDTH        = 4096;
 const int    CAMHEIGHT       = 800;
@@ -653,6 +653,11 @@ int main() {
 
     // --- Camera ---
     CamController cam(0, CAMWIDTH, CAMHEIGHT);
+
+	//SET COLOUR HERE!
+	cam.addTrackedColor("red", 0, 10, 100, 100, 170, 180, 100, 100);
+	cam.addTrackedColor("purple", 130, 160, 100, 100, 130, 160, 100, 100);
+	
     cam.setFlip(FLIP_CAMERA);
     cam.setTrackingStrategy(CamController::TrackingStrategy::LARGEST);
     cam.setMinArea(MIN_AREA);

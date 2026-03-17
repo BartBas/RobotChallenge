@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <map>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -22,13 +23,23 @@ public:
     enum class TrackingStrategy {
         LARGEST,
         CLOSEST_TO_CENTER,
-        LEFTMOST
+        LEFTMOST,
+        LOWEST
+    };
+    
+    struct ColorRange {
+        std::string name;
+        cv::Scalar lowerMin;
+        cv::Scalar lowerMax;
+        cv::Scalar upperMin;
+        cv::Scalar upperMax;
     };
     
     struct RedObject {
         cv::Point2f center;
         double area;
         cv::Rect boundingBox;
+        std::string colorName;  // Which color was detected
     };
     
     struct Direction {
@@ -54,13 +65,24 @@ public:
     double getDeadOnThreshold() const;
     cv::Mat getFrame() const;
     cv::Mat getFrameWithVisualization();
-    void setRedRangeLower(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
-    void setRedRangeUpper(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
     bool isOpened() const;
     void release();
     void setFlip(bool flip);
     bool isFlipped() const;
 
+    // Multi-color tracking functions
+    bool addTrackedColor(const std::string& name, 
+                        int lowerHueMin, int lowerHueMax, int lowerSatMin, int lowerValMin,
+                        int upperHueMin, int upperHueMax, int upperSatMin, int upperValMin);
+    bool removeTrackedColor(const std::string& name);
+    bool hasColor(const std::string& name) const;
+    int getColorCount() const;
+    std::vector<std::string> getColorNames() const;
+    void clearAllColors();
+    
+    // Legacy red color setter (deprecated but kept for compatibility)
+    void setRedRangeLower(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
+    void setRedRangeUpper(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
 
     void enableStreaming(bool enable, int port = 8080);
     bool isStreamingEnabled() const;
@@ -70,7 +92,7 @@ private:
    
     cv::VideoCapture cap;
     cv::Mat currentFrame;
-    cv::Mat redMask;
+    std::vector<cv::Mat> colorMasks;  // One mask per tracked color
     std::vector<RedObject> detectedObjects;
     
     int cameraIndex;
@@ -79,10 +101,9 @@ private:
     double minArea;
     double deadOnThreshold;
     
-    cv::Scalar redLowerMin;
-    cv::Scalar redLowerMax;
-    cv::Scalar redUpperMin;
-    cv::Scalar redUpperMax;
+    // Map of color name to color ranges
+    std::map<std::string, ColorRange> trackedColors;
+    static const int MAX_TRACKED_COLORS = 3;
     
     TrackingStrategy strategy;
     
@@ -95,9 +116,9 @@ private:
     std::mutex frameMutex;
     cv::Mat streamFrame;
     
-    void detectRedPixels();
-    std::vector<RedObject> findRedObjects();
-    Direction analyzeRedObjects();
+    void detectColorPixels();
+    std::vector<RedObject> findColorObjects();
+    Direction analyzeColorObjects();
     void drawVisualization(cv::Mat& frame);
     bool flip180;
     void streamingLoop();

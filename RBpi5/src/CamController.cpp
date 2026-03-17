@@ -19,10 +19,10 @@ CamController::CamController(int cameraIndex, int width, int height)
     , streamPort(8080)
     , flip180(false)
 {
-    redLowerMin = cv::Scalar(0, 100, 100);
-    redLowerMax = cv::Scalar(10, 255, 255);
-    redUpperMin = cv::Scalar(170, 100, 100);
-    redUpperMax = cv::Scalar(180, 255, 255);
+    // Initialize with default red color
+    addTrackedColor("red",
+                    0, 10, 100, 100,      // Lower red range (0-10 hue)
+                    170, 180, 100, 100);  // Upper red range (170-180 hue)
 }
 
 CamController::~CamController() {
@@ -56,6 +56,75 @@ void CamController::setFlip(bool flip) {
 
 bool CamController::isFlipped() const {
     return flip180;
+}
+
+bool CamController::addTrackedColor(const std::string& name,
+                                     int lowerHueMin, int lowerHueMax, int lowerSatMin, int lowerValMin,
+                                     int upperHueMin, int upperHueMax, int upperSatMin, int upperValMin) {
+    // Check if we've reached the maximum number of tracked colors
+    if (trackedColors.size() >= MAX_TRACKED_COLORS && trackedColors.find(name) == trackedColors.end()) {
+        cerr << "Maximum number of tracked colors (" << MAX_TRACKED_COLORS << ") reached. Cannot add '" << name << "'." << endl;
+        return false;
+    }
+    
+    ColorRange range;
+    range.name = name;
+    range.lowerMin = cv::Scalar(lowerHueMin, lowerSatMin, lowerValMin);
+    range.lowerMax = cv::Scalar(lowerHueMax, 255, 255);
+    range.upperMin = cv::Scalar(upperHueMin, upperSatMin, upperValMin);
+    range.upperMax = cv::Scalar(upperHueMax, 255, 255);
+    
+    trackedColors[name] = range;
+    cout << "Added tracked color: " << name << endl;
+    return true;
+}
+
+bool CamController::removeTrackedColor(const std::string& name) {
+    auto it = trackedColors.find(name);
+    if (it != trackedColors.end()) {
+        trackedColors.erase(it);
+        cout << "Removed tracked color: " << name << endl;
+        return true;
+    }
+    cerr << "Color '" << name << "' not found." << endl;
+    return false;
+}
+
+bool CamController::hasColor(const std::string& name) const {
+    return trackedColors.find(name) != trackedColors.end();
+}
+
+int CamController::getColorCount() const {
+    return trackedColors.size();
+}
+
+std::vector<std::string> CamController::getColorNames() const {
+    std::vector<std::string> names;
+    for (const auto& pair : trackedColors) {
+        names.push_back(pair.first);
+    }
+    return names;
+}
+
+void CamController::clearAllColors() {
+    trackedColors.clear();
+    cout << "Cleared all tracked colors." << endl;
+}
+
+void CamController::setRedRangeLower(int hueMin, int hueMax, int satMin, int valMin) {
+    if (hasColor("red")) {
+        ColorRange& redRange = trackedColors["red"];
+        redRange.lowerMin = Scalar(hueMin, satMin, valMin);
+        redRange.lowerMax = Scalar(hueMax, 255, 255);
+    }
+}
+
+void CamController::setRedRangeUpper(int hueMin, int hueMax, int satMin, int valMin) {
+    if (hasColor("red")) {
+        ColorRange& redRange = trackedColors["red"];
+        redRange.upperMin = Scalar(hueMin, satMin, valMin);
+        redRange.upperMax = Scalar(hueMax, 255, 255);
+    }
 }
 
 bool CamController::captureFrame() {
@@ -99,58 +168,84 @@ bool CamController::captureFrame() {
         }
     }
     
-    detectRedPixels();
-    detectedObjects = findRedObjects();
+    detectColorPixels();
+    detectedObjects = findColorObjects();
     
     return true;
 }
 
-void CamController::detectRedPixels() {
-    Mat hsv, mask1, mask2;
+void CamController::detectColorPixels() {
+    Mat hsv;
     cvtColor(currentFrame, hsv, COLOR_BGR2HSV);
     
-    // Red color wraps around in HSV, so we need two ranges
-    inRange(hsv, redLowerMin, redLowerMax, mask1);
-    inRange(hsv, redUpperMin, redUpperMax, mask2);
+    colorMasks.clear();
     
-    redMask = mask1 | mask2;
+    // Create a mask for each tracked color
+    for (const auto& colorPair : trackedColors) {
+        const ColorRange& range = colorPair.second;
+        Mat mask1, mask2;
+        
+        // Some colors might wrap around (like red), others don't
+        // We handle this by checking both ranges
+        inRange(hsv, range.lowerMin, range.lowerMax, mask1);
+        inRange(hsv, range.upperMin, range.upperMax, mask2);
+        
+        Mat colorMask = mask1 | mask2;
+        colorMasks.push_back(colorMask);
+    }
 }
 
-vector<CamController::RedObject> CamController::findRedObjects() {
+vector<CamController::RedObject> CamController::findColorObjects() {
     vector<RedObject> objects;
     
-    vector<vector<Point>> contours;
-    findContours(redMask, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
-    
-    for (const auto& contour : contours) {
-        double area = contourArea(contour);
+    // Process each color mask
+    size_t colorIndex = 0;
+    for (const auto& colorPair : trackedColors) {
+        const string& colorName = colorPair.first;
         
-        if (area > minArea) {
-            RedObject obj;
-            obj.area = area;
-            obj.boundingBox = boundingRect(contour);
+        if (colorIndex >= colorMasks.size()) break;
+        
+        vector<vector<Point>> contours;
+        findContours(colorMasks[colorIndex].clone(), contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+        
+        for (const auto& contour : contours) {
+            double area = contourArea(contour);
             
-            Moments m = moments(contour);
-            obj.center = Point2f(m.m10 / m.m00, m.m01 / m.m00);
-            
-            objects.push_back(obj);
+            if (area > minArea) {
+                RedObject obj;
+                obj.area = area;
+                obj.boundingBox = boundingRect(contour);
+                obj.colorName = colorName;
+                
+                Moments m = moments(contour);
+                if (m.m00 > 0) {
+                    obj.center = Point2f(m.m10 / m.m00, m.m01 / m.m00);
+                } else {
+                    obj.center = Point2f(obj.boundingBox.x + obj.boundingBox.width / 2,
+                                        obj.boundingBox.y + obj.boundingBox.height / 2);
+                }
+                
+                objects.push_back(obj);
+            }
         }
+        
+        colorIndex++;
     }
     
     return objects;
 }
 
 CamController::Direction CamController::getDirection() {
-    return analyzeRedObjects();
+    return analyzeColorObjects();
 }
 
-CamController::Direction CamController::analyzeRedObjects() {
+CamController::Direction CamController::analyzeColorObjects() {
     Direction dir;
     dir.objectCount = detectedObjects.size();
     
     if (detectedObjects.empty()) {
         dir.angle = 0;
-        dir.command = "NO RED DETECTED";
+        dir.command = "NO OBJECTS DETECTED";
         dir.distance = 0;
         return dir;
     }
@@ -178,6 +273,12 @@ CamController::Direction CamController::analyzeRedObjects() {
                 return a.center.x < b.center.x;
             }));
     }
+    else if (strategy == TrackingStrategy::LOWEST) {
+        targetObject = &(*max_element(detectedObjects.begin(), detectedObjects.end(),
+            [](const RedObject& a, const RedObject& b) {
+                return a.center.y < b.center.y;
+            }));
+    }
     
     // Calculate direction
     int frameCenterX = currentFrame.cols / 2;
@@ -188,11 +289,11 @@ CamController::Direction CamController::analyzeRedObjects() {
     dir.distance = abs(offsetX) / maxOffset;
     
     if (abs(dir.angle) < deadOnThreshold) {
-        dir.command = "FORWARD";
+        dir.command = "FORWARD (" + targetObject->colorName + ")";
     } else if (dir.angle > 0) {
-        dir.command = "RIGHT " + to_string((int)abs(dir.angle)) + " degrees";
+        dir.command = "RIGHT " + to_string((int)abs(dir.angle)) + " degrees (" + targetObject->colorName + ")";
     } else {
-        dir.command = "LEFT " + to_string((int)abs(dir.angle)) + " degrees";
+        dir.command = "LEFT " + to_string((int)abs(dir.angle)) + " degrees (" + targetObject->colorName + ")";
     }
     
     return dir;
@@ -264,21 +365,31 @@ void CamController::drawVisualization(Mat& frame) {
                 return a.center.x < b.center.x;
             }));
     }
+    else if (strategy == TrackingStrategy::LOWEST) {
+        targetObject = &(*max_element(detectedObjects.begin(), detectedObjects.end(),
+            [](const RedObject& a, const RedObject& b) {
+                return a.center.y < b.center.y;
+            }));
+    }
     
     // Draw all objects
     for (size_t i = 0; i < detectedObjects.size(); i++) {
-        Scalar color = (&detectedObjects[i] == targetObject) ? 
-                       Scalar(0, 255, 0) : Scalar(128, 128, 128);
+        bool isTarget = (&detectedObjects[i] == targetObject);
         
-        circle(frame, detectedObjects[i].center, 10, color, 2);
-        rectangle(frame, detectedObjects[i].boundingBox, color, 2);
+        // Use green for target, gray for others
+        cv::Scalar boxColor = isTarget ? cv::Scalar(0, 255, 0) : cv::Scalar(128, 128, 128);
         
-        string label = "Cup " + to_string(i + 1);
-        if (&detectedObjects[i] == targetObject) label += " (TARGET)";
+        circle(frame, detectedObjects[i].center, 10, boxColor, 2);
+        rectangle(frame, detectedObjects[i].boundingBox, boxColor, 2);
+        
+        // Label with color name and object number
+        string label = detectedObjects[i].colorName + " " + to_string(i + 1);
+        if (isTarget) label += " (TARGET)";
+        
         putText(frame, label, 
                 Point(detectedObjects[i].boundingBox.x, 
                       detectedObjects[i].boundingBox.y - 10),
-                FONT_HERSHEY_SIMPLEX, 0.5, color, 2);
+                FONT_HERSHEY_SIMPLEX, 0.5, boxColor, 2);
     }
     
     // Draw center point and line to target
@@ -290,16 +401,6 @@ void CamController::drawVisualization(Mat& frame) {
         line(frame, Point(frameCenterX, frameCenterY), 
              targetObject->center, Scalar(255, 255, 0), 2);
     }
-}
-
-void CamController::setRedRangeLower(int hueMin, int hueMax, int satMin, int valMin) {
-    redLowerMin = Scalar(hueMin, satMin, valMin);
-    redLowerMax = Scalar(hueMax, 255, 255);
-}
-
-void CamController::setRedRangeUpper(int hueMin, int hueMax, int satMin, int valMin) {
-    redUpperMin = Scalar(hueMin, satMin, valMin);
-    redUpperMax = Scalar(hueMax, 255, 255);
 }
 
 bool CamController::isOpened() const {
