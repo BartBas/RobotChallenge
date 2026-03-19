@@ -10,17 +10,17 @@ QGPMaker_Encoder *encoders[4];
 const int PPR = 12;
 const int gearratio = 90;
 const int CPR = (PPR * 4) * gearratio;
-const unsigned long sampleTime = 100; // Interval in ms (0.1 seconde)
+const unsigned long sampleTime = 50; // Iets sneller (20Hz) voor betere respons
 
-// CORRECTIE: Richting aangepast omdat motorpolariteit is omgewisseld
+// Hardware correctie: aanpassen op basis van jouw bedrading
 int encoderDirection[4] = {-1, -1, 1, 1}; 
 
-// PID Instellingen
-double targetRPM = 60.0; 
-double Kp = 2.5;         
-double Ki = 2.5;         
-
+// PID Instellingen (nu arrays per wiel voor onafhankelijke sturing)
+double targetRPMs[4] = {0.0, 0.0, 0.0, 0.0}; // Individuele doelen
 double integralError[4] = {0, 0, 0, 0};
+double Kp = 2.5;
+double Ki = 5.0; // Iets verhoogd voor snellere correctie bij lage toeren
+
 unsigned long lastMillis = 0;
 
 void setup() {
@@ -30,60 +30,67 @@ void setup() {
   for (int i = 0; i < 4; i++) {
     motors[i] = AFMS.getMotor(i + 1);
     encoders[i] = new QGPMaker_Encoder(i + 1);
-    motors[i]->run(FORWARD); // Controleer of dit nog de juiste kant op is!
     motors[i]->setSpeed(0);
+    motors[i]->run(RELEASE);
   }
   
-  Serial.println("Systeem gestart. Encoderrichting gecorrigeerd.");
+  Serial.println("Slave Systeem Online. Wacht op commando's...");
   lastMillis = millis();
 }
 
 void loop() {
+  // HIER: Voeg later je Slave-logica toe (bijv. Wire.onReceive of Serial input)
+  // Voor nu als voorbeeld: zet hier handmatig targets om te testen
+  targetRPMs[0] = -60.0;  // Wiel 1 (rechtsachter)
+  targetRPMs[1] = -60.0; // Wiel 2 (rechtsvoor)
+  targetRPMs[2] = 60.0;  // Wiel 3 (linksvoor)
+  targetRPMs[3] = 60.0; // Wiel 4 (linksachter)
+
   unsigned long currentMillis = millis();
 
   if (currentMillis - lastMillis >= sampleTime) {
     double dt = (double)(currentMillis - lastMillis) / 1000.0;
     lastMillis = currentMillis;
 
-    Serial.print("Target:");
-    Serial.print(targetRPM);
-    Serial.print(" ");
-
     for (int i = 0; i < 4; i++) {
-      // 1. Lees de encoder uit en reset
+      // 1. Lees de encoder (met richtingcorrectie)
       long pos = encoders[i]->read() * encoderDirection[i]; 
       encoders[i]->write(0);
       
-      // 2. Bereken actuele RPM
+      // 2. Bereken actuele RPM (Snelheid + Richting)
       double currentRPM = ((double)pos / (double)CPR) * (60.0 / dt);
 
       // 3. PI Regeling
-      double error = targetRPM - currentRPM;
+      double error = targetRPMs[i] - currentRPM;
       
-      // Anti-windup & Integral reset bij stilstand
-      if (targetRPM == 0) {
+      // Integrale actie & Anti-windup
+      if (abs(targetRPMs[i]) < 1.0) {
         integralError[i] = 0;
       } else {
         integralError[i] += error * dt;
-        integralError[i] = constrain(integralError[i], -100, 100); 
+        integralError[i] = constrain(integralError[i], -150, 150); 
       }
 
-      // Bereken output
       double output = (Kp * error) + (Ki * integralError[i]);
       
-      // Begrens naar 0-255 PWM
-      int finalPWM = constrain((int)output, 0, 255);
+      // 4. Richting en PWM bepalen
+      // We gebruiken de absolute waarde voor de PWM, de 'sign' voor de richting
+      int finalPWM = constrain(abs((int)output), 0, 255);
 
-      // 4. Stuur motor aan
+      if (targetRPMs[i] > 0) {
+        motors[i]->run(FORWARD);
+      } else if (targetRPMs[i] < 0) {
+        motors[i]->run(BACKWARD);
+      } else {
+        motors[i]->run(RELEASE);
+        finalPWM = 0;
+      }
+
       motors[i]->setSpeed(finalPWM);
 
-      // 5. Plotter output
-      Serial.print("M");
-      Serial.print(i + 1);
-      Serial.print(":");
-      Serial.print(currentRPM);
-      
-      if (i < 3) Serial.print(" ");
+      // Debugging/Plotter
+      Serial.print("M"); Serial.print(i + 1); Serial.print(":");
+      Serial.print(currentRPM); Serial.print(" ");
     }
     Serial.println();
   }
