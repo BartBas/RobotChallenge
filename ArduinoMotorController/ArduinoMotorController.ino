@@ -18,8 +18,8 @@ const unsigned long sampleTime = 50;
 const float MAX_RPM_LIMIT = 80.0; 
 
 // Servo Settings
-const int SERVO_STOP = 90;  
-const int SERVO_RUN = 180; 
+const int SERVO_STOP = 80;  
+const int SERVO_RUN = 50;
 
 int encoderDirection[4] = { -1, -1, 1, 1 }; 
 double targetRPMs[4] = { 0, 0, 0, 0 }; 
