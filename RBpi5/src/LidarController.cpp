@@ -42,6 +42,17 @@ bool LidarController::initialize() {
     return false;
 }
 
+void LidarController::setExcludeZones(const std::vector<ExcludeZone>& zones) {
+    excludeZones_ = zones;
+}
+
+bool LidarController::isExcluded(float angle) const {
+    for (const auto& z : excludeZones_)
+        if (angle >= z.angleMin && angle <= z.angleMax)
+            return true;
+    return false;
+}
+
 std::vector<LidarPoint> LidarController::getLatestScan() {
     std::vector<LidarPoint> points;
     node_info nodes[1000];
@@ -56,10 +67,12 @@ std::vector<LidarPoint> LidarController::getLatestScan() {
             float angle    = (float)nodes[i].angle / 128.0f;
             float distance = (float)nodes[i].dist  / 4000.0f;
 
+            if (distance <= 0.0f || !std::isfinite(distance) || !std::isfinite(angle)) continue;
             if (distance > 0.12f && distance < 10.0f) {
                 if (flipMounted)
                     angle = std::fmod(angle + 180.0f, 360.0f);
-                points.push_back({angle, distance});
+                if (!isExcluded(angle))
+                    points.push_back({angle, distance});
             }
         }
     }

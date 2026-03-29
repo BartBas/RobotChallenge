@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────
+#  Robot Configuration
+#  Lines starting with # are comments.
+#  Format: key = value
+# ─────────────────────────────────────────────
+
+# ── Hardware ──────────────────────────────────
+lidar_port      = /dev/ttyUSB0
+motor_port      = /dev/ttyUSB1
+flip_lidar      = true
+flip_camera     = true
+
+# ── Lidar wheel exclusion zones ───────────────
+# Ranges of angles (degrees) to ignore because
+# the lidar can see its own wheels/chassis.
+# Format: lidar_exclude = angle_min angle_max
+# Add as many lines as needed.
+lidar_exclude   = 80 100
+lidar_exclude   = 260 280
+
+# ── Camera ────────────────────────────────────
+cam_width       = 4096
+cam_height      = 800
+cam_fps         = 30
+stream_port     = 8081
+
+# ── Colour tracking ───────────────────────────
+# Format:
+#   color = name  lHueMin lHueMax lSatMin lValMin  uHueMin uHueMax uSatMin uValMin
+# (l = lower HSV band, u = upper HSV band — for colours that wrap around 0/180)
+color           = red     0   10  100  100   170  180  100  100
+
+# ── Vision tuning ────────────────────────────
+min_area        = 200.0
+dead_on_thresh  = 5.0
+
+# ── Web dashboard ────────────────────────────
+web_port        = 8080
+
+# ── Brain / autonomous mode ──────────────────
+brain_hz        = 10
+brain_clear_dist = 0.6
+brain_chase_speed = 45
+brain_seek_speed  = 30
+brain_avoid_speed = 35
+brain_front_arc   = 40.0

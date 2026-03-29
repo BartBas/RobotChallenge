@@ -1,6 +1,8 @@
 #include "LidarController.h"
 #include "CamController.h"
 #include "MotorController.h"
+#include "MapController.h"
+#include "Config.h"
 #include "crow_all.h"
 #include <iostream>
 #include <vector>
@@ -13,23 +15,9 @@
 #include <string>
 
 // ===== CONFIGURATION =====
-const int    TARGET_FPS      = 30;
-const int    WEB_PORT        = 8080;
-const int    STREAM_PORT     = 8081;
-const bool   FLIP_CAMERA     = true;
-const bool   FLIP_LIDAR      = true;
-const double MIN_AREA        = 200.0;
-const double DEAD_ON_THRESH  = 5.0;
-const int    CAMWIDTH        = 4096;
-const int    CAMHEIGHT       = 800;
-
-// Brain tuning
-const int    BRAIN_HZ            = 10;    // autonomous loop rate
-const float  BRAIN_CLEAR_DIST    = 0.6f;  // metres — obstacle threshold (front arc)
-const int    BRAIN_CHASE_SPEED   = 45;    // % speed when chasing target
-const int    BRAIN_SEEK_SPEED    = 30;    // % speed when searching
-const int    BRAIN_AVOID_SPEED   = 35;    // % speed when avoiding obstacle
-const float  BRAIN_FRONT_ARC     = 40.0f; // ±degrees around heading counted as "front"
+// All values loaded from config.txt at startup.
+// Defaults are defined in Config.h.
+RobotConfig CFG;
 // =========================
 
 std::atomic<bool> running{true};
@@ -50,6 +38,12 @@ struct TrackingState {
 };
 TrackingState global_tracking;
 std::mutex    tracking_mutex;
+
+// ══════════════════════════════════════════════════════════════════
+//  Map state
+// ══════════════════════════════════════════════════════════════════
+MapController global_map;
+std::mutex    map_mutex;
 
 // ══════════════════════════════════════════════════════════════════
 //  MotorCommand — what any controller (manual or brain) wants
@@ -144,8 +138,12 @@ void lidarThread(LidarController& lidar) {
     while (running) {
         auto scan = lidar.getLatestScan();
         if (!scan.empty()) {
-            std::lock_guard<std::mutex> lk(scan_mutex);
-            global_scan = scan;
+            {
+                std::lock_guard<std::mutex> lk(scan_mutex);
+                global_scan = scan;
+            }
+            // Feed into KISS-ICP map (runs in lidar thread — no extra thread needed)
+            global_map.update(scan);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -156,7 +154,7 @@ void lidarThread(LidarController& lidar) {
 // ══════════════════════════════════════════════════════════════════
 
 void cameraThread(CamController& cam) {
-    const long frame_us = 1000000 / TARGET_FPS;
+    const long frame_us = 1000000 / CFG.camFps;
     int  frameCount = 0;
     auto fpsTimer   = std::chrono::steady_clock::now();
 
@@ -205,7 +203,7 @@ void cameraThread(CamController& cam) {
 // ══════════════════════════════════════════════════════════════════
 
 void brainThread() {
-    const auto period = std::chrono::milliseconds(1000 / BRAIN_HZ);
+    const auto period = std::chrono::milliseconds(1000 / CFG.brainHz);
 
     while (running) {
         auto t0 = std::chrono::steady_clock::now();
@@ -237,7 +235,7 @@ void brainThread() {
             float rel = p.angle - 90.f;
             while (rel >  180.f) rel -= 360.f;
             while (rel < -180.f) rel += 360.f;
-            if (std::abs(rel) < BRAIN_FRONT_ARC && p.range < front_closest) {
+            if (std::abs(rel) < CFG.brainFrontArc && p.range < front_closest) {
                 front_closest = p.range;
                 worst_angle   = rel;
             }
@@ -252,11 +250,11 @@ void brainThread() {
             reason = "e-stop active";
             cmd.speed = 0; cmd.cmd_enable = false;
 
-        } else if (front_closest < BRAIN_CLEAR_DIST) {
+        } else if (front_closest < CFG.brainClearDist) {
             // AVOID — turn away from obstacle
             mode   = "AVOID";
             reason = "obstacle at " + std::to_string((int)(front_closest * 100)) + "cm";
-            cmd.speed     = BRAIN_AVOID_SPEED;
+            cmd.speed     = CFG.brainAvoidSpeed;
             cmd.direction = 90;                       // keep heading forward
             // Turn away from the side the obstacle is on
             cmd.turn = (worst_angle > 0) ? 2 : 1;    // 1=left, 2=right
@@ -265,7 +263,7 @@ void brainThread() {
             // CHASE — steer toward target bearing
             mode   = "CHASE";
             reason = "target at " + std::to_string((int)tracking.angle) + "deg";
-            cmd.speed = BRAIN_CHASE_SPEED;
+            cmd.speed = CFG.brainChaseSpeed;
             // Convert camera bearing (-90..+90) to drive direction (0..359)
             // Positive angle = target to the right → turn right
             int heading = 90 + static_cast<int>(tracking.angle);
@@ -277,7 +275,7 @@ void brainThread() {
             // SEEK — slow rotation to find a target
             mode   = "SEEK";
             reason = "no target visible";
-            cmd.speed     = BRAIN_SEEK_SPEED;
+            cmd.speed     = CFG.brainSeekSpeed;
             cmd.direction = 90;
             cmd.turn      = 1; // spin left (arbitrary, could alternate)
         }
@@ -598,6 +596,61 @@ static const std::string DASHBOARD_HTML = R"html(
   /* front-clear bar */
   .fc-bar-bg   { width: 100%; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 3px; }
   .fc-bar-fill { height: 100%; width: 100%; background: var(--ok); border-radius: 3px; transition: width .3s, background .3s; }
+
+  /* ── Map panel ── */
+  #map-panel {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 10px 18px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #map-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  #map-canvas {
+    display: block;
+    background: #060a0d;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    cursor: grab;
+    width: 100%;
+    height: 340px;
+  }
+  .map-legend {
+    display: flex;
+    gap: 14px;
+    font-family: var(--mono);
+    font-size: .55rem;
+    color: var(--dim);
+    letter-spacing: .08em;
+  }
+  .map-legend span { display: flex; align-items: center; gap: 5px; }
+  .leg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  #map-pose-lbl {
+    font-family: var(--mono);
+    font-size: .6rem;
+    color: var(--dim);
+    margin-left: auto;
+  }
+  .map-btn {
+    font-family: var(--mono);
+    font-size: .58rem;
+    letter-spacing: .07em;
+    padding: 4px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--dim);
+    cursor: pointer;
+    transition: color .1s, border-color .1s;
+  }
+  .map-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .map-btn.danger:hover { color: var(--warn); border-color: var(--warn); }
 </style>
 </head>
 <body>
@@ -732,6 +785,24 @@ static const std::string DASHBOARD_HTML = R"html(
     </div>
 
   </div>
+</div>
+
+<!-- Map panel -->
+<div id="map-panel">
+  <div id="map-toolbar">
+    <span class="lbl">SLAM MAP — KISS-ICP</span>
+    <button class="map-btn" onclick="mapFitView()">FIT</button>
+    <button class="map-btn" onclick="mapResetZoom()">RESET VIEW</button>
+    <button class="map-btn danger" onclick="resetMap()">CLEAR MAP</button>
+    <div class="map-legend">
+      <span><div class="leg-dot" style="background:#1a3a1a;border:1px solid #39ff84;"></div>FREE</span>
+      <span><div class="leg-dot" style="background:#3a1a1a;border:1px solid #ff3d5a;"></div>OCCUPIED</span>
+      <span><div class="leg-dot" style="background:#00e5ff;"></div>ROBOT</span>
+      <span><div class="leg-dot" style="background:#ffaa00;"></div>TRAIL</span>
+    </div>
+    <span id="map-pose-lbl">x: 0.00  y: 0.00  θ: 0°</span>
+  </div>
+  <canvas id="map-canvas"></canvas>
 </div>
 
 <script>
@@ -1075,6 +1146,213 @@ static const std::string DASHBOARD_HTML = R"html(
   setInterval(fetchMotorState, 400);
 
   syncDisplay();
+
+  // ══════════════════════════════════════════════════════════════════
+  // ─── SLAM Map ───
+  // ══════════════════════════════════════════════════════════════════
+  const mapCanvas = document.getElementById('map-canvas');
+  const mapCtx    = mapCanvas.getContext('2d');
+
+  // View state
+  let mapZoom = 40;        // pixels per metre
+  let mapPanX = 0;
+  let mapPanY = 0;
+  let mapDragging = false;
+  let mapDragStart = {};
+
+  // Decoded occupancy grid (cached so we only re-decode when data changes)
+  let cachedGrid   = null;
+  let cachedBitmap = null;   // OffscreenCanvas with drawn grid
+
+  // Resize canvas to fill its CSS size
+  function resizeMapCanvas() {
+    mapCanvas.width  = mapCanvas.offsetWidth;
+    mapCanvas.height = mapCanvas.offsetHeight;
+  }
+  resizeMapCanvas();
+  window.addEventListener('resize', () => { resizeMapCanvas(); drawMap(); });
+
+  // World → canvas pixel
+  function w2c(wx, wy) {
+    const cx = mapCanvas.width  / 2 + mapPanX;
+    const cy = mapCanvas.height / 2 + mapPanY;
+    return { x: cx + wx * mapZoom, y: cy - wy * mapZoom };
+  }
+
+  // Draw everything
+  function drawMap(data) {
+    const W = mapCanvas.width, H = mapCanvas.height;
+    mapCtx.clearRect(0, 0, W, H);
+
+    // Background
+    mapCtx.fillStyle = '#060a0d';
+    mapCtx.fillRect(0, 0, W, H);
+
+    // Grid lines (1 m spacing)
+    mapCtx.strokeStyle = '#1a2d45';
+    mapCtx.lineWidth   = 0.5;
+    const gridStep = mapZoom;
+    const cx0 = (W/2 + mapPanX) % gridStep;
+    const cy0 = (H/2 + mapPanY) % gridStep;
+    for (let x = cx0; x < W; x += gridStep) { mapCtx.beginPath(); mapCtx.moveTo(x,0); mapCtx.lineTo(x,H); mapCtx.stroke(); }
+    for (let y = cy0; y < H; y += gridStep) { mapCtx.beginPath(); mapCtx.moveTo(0,y); mapCtx.lineTo(W,y); mapCtx.stroke(); }
+
+    if (!data) return;
+
+    // ── Occupancy grid ──
+    if (data.grid && data.grid.rle && data.grid.width > 0) {
+      const g   = data.grid;
+      const res = g.res;       // metres per cell
+      const cpx = mapZoom * res;  // canvas pixels per cell
+
+      // Top-left canvas pixel of cell (0,0)
+      const o = w2c(g.originX, g.originY + g.height * res);
+
+      for (let ri = 0, ci = 0, row = 0, col = 0; ri < g.rle.length; ri++) {
+        const val = g.rle[ri].v;
+        let   cnt = g.rle[ri].n;
+        while (cnt-- > 0) {
+          if (val !== 0) {
+            const px = o.x + col * cpx;
+            const py = o.y + row * cpx;
+            mapCtx.fillStyle = val === 2 ? 'rgba(255,61,90,0.55)' : 'rgba(57,255,132,0.12)';
+            mapCtx.fillRect(px, py, cpx + 0.5, cpx + 0.5);
+          }
+          col++;
+          if (col >= g.width) { col = 0; row++; }
+        }
+      }
+    }
+
+    // ── Point cloud ──
+    if (data.cloud && data.cloud.length > 0) {
+      mapCtx.fillStyle = 'rgba(57,255,132,0.6)';
+      for (const p of data.cloud) {
+        const px = w2c(p.x, p.y);
+        mapCtx.fillRect(px.x - 1, px.y - 1, 2, 2);
+      }
+    }
+
+    // ── Trail ──
+    if (data.path && data.path.length > 1) {
+      mapCtx.strokeStyle = 'rgba(255,170,0,0.7)';
+      mapCtx.lineWidth   = 1.5;
+      mapCtx.beginPath();
+      const p0 = w2c(data.path[0].x, data.path[0].y);
+      mapCtx.moveTo(p0.x, p0.y);
+      for (let i = 1; i < data.path.length; i++) {
+        const pp = w2c(data.path[i].x, data.path[i].y);
+        mapCtx.lineTo(pp.x, pp.y);
+      }
+      mapCtx.stroke();
+    }
+
+    // ── Robot ──
+    if (data.pose) {
+      const rp  = w2c(data.pose.x, data.pose.y);
+      const yaw = data.pose.yaw;   // radians
+      const r   = 10;
+
+      // Body
+      mapCtx.save();
+      mapCtx.translate(rp.x, rp.y);
+      mapCtx.rotate(-yaw);   // canvas y-axis is flipped
+      mapCtx.strokeStyle = '#00e5ff';
+      mapCtx.lineWidth   = 2;
+      mapCtx.shadowBlur  = 10;
+      mapCtx.shadowColor = '#00e5ff';
+      mapCtx.beginPath();
+      mapCtx.arc(0, 0, r, 0, Math.PI * 2);
+      mapCtx.stroke();
+      // Heading arrow
+      mapCtx.beginPath();
+      mapCtx.moveTo(0, 0);
+      mapCtx.lineTo(r + 6, 0);
+      mapCtx.stroke();
+      mapCtx.restore();
+
+      // Pose label
+      const deg = (data.pose.yaw * 180 / Math.PI).toFixed(1);
+      document.getElementById('map-pose-lbl').textContent =
+        `x: ${data.pose.x.toFixed(2)}  y: ${data.pose.y.toFixed(2)}  θ: ${deg}°`;
+    }
+
+    // Origin cross
+    const op = w2c(0, 0);
+    mapCtx.strokeStyle = '#4a6080';
+    mapCtx.lineWidth   = 1;
+    mapCtx.beginPath(); mapCtx.moveTo(op.x-8,op.y); mapCtx.lineTo(op.x+8,op.y); mapCtx.stroke();
+    mapCtx.beginPath(); mapCtx.moveTo(op.x,op.y-8); mapCtx.lineTo(op.x,op.y+8); mapCtx.stroke();
+
+    // Scale bar (bottom-left)
+    const barM  = niceBarLen(5 / mapZoom);   // target ~5% of width
+    const barPx = barM * mapZoom;
+    mapCtx.strokeStyle = '#4a6080'; mapCtx.lineWidth = 2;
+    mapCtx.beginPath(); mapCtx.moveTo(14, H-14); mapCtx.lineTo(14+barPx, H-14); mapCtx.stroke();
+    mapCtx.fillStyle = '#4a6080'; mapCtx.font = '9px Share Tech Mono';
+    mapCtx.fillText(barM >= 1 ? barM.toFixed(0)+'m' : (barM*100).toFixed(0)+'cm', 14, H-18);
+  }
+
+  function niceBarLen(target) {
+    const niceVals = [0.1,0.25,0.5,1,2,5,10,20,50];
+    return niceVals.reduce((p,x) => Math.abs(x-target)<Math.abs(p-target)?x:p);
+  }
+
+  // Fit view to show all path points
+  function mapFitView() {
+    if (!lastMapData || !lastMapData.path || lastMapData.path.length < 2) return;
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    for (const p of lastMapData.path) {
+      minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x);
+      minY=Math.min(minY,p.y); maxY=Math.max(maxY,p.y);
+    }
+    const spanX = maxX-minX+2, spanY = maxY-minY+2;
+    mapZoom = Math.min(mapCanvas.width/spanX, mapCanvas.height/spanY) * 0.85;
+    mapPanX = -((minX+maxX)/2) * mapZoom;
+    mapPanY =  ((minY+maxY)/2) * mapZoom;
+    drawMap(lastMapData);
+  }
+
+  function mapResetZoom() { mapZoom=40; mapPanX=0; mapPanY=0; drawMap(lastMapData); }
+
+  async function resetMap() {
+    await fetch('/map/reset', {method:'POST'});
+    lastMapData = null;
+    drawMap(null);
+  }
+
+  // Pan & zoom interactions
+  mapCanvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    mapZoom = Math.max(5, Math.min(200, mapZoom * (e.deltaY < 0 ? 1.15 : 1/1.15)));
+    drawMap(lastMapData);
+  }, {passive:false});
+  mapCanvas.addEventListener('mousedown', e => {
+    mapDragging = true;
+    mapDragStart = {x:e.clientX, y:e.clientY, px:mapPanX, py:mapPanY};
+    mapCanvas.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', e => {
+    if (!mapDragging) return;
+    mapPanX = mapDragStart.px + (e.clientX - mapDragStart.x);
+    mapPanY = mapDragStart.py + (e.clientY - mapDragStart.y);
+    drawMap(lastMapData);
+  });
+  window.addEventListener('mouseup', () => { mapDragging=false; mapCanvas.style.cursor='grab'; });
+  mapCanvas.addEventListener('dblclick', mapResetZoom);
+
+  // Poll /map every 500 ms
+  let lastMapData = null;
+  async function fetchMap() {
+    try {
+      const d = await (await fetch('/map')).json();
+      lastMapData = d;
+      drawMap(d);
+    } catch(e) {}
+    setTimeout(fetchMap, 500);
+  }
+  fetchMap();
+
 </script>
 </body>
 </html>
@@ -1085,36 +1363,43 @@ static const std::string DASHBOARD_HTML = R"html(
 int main() {
     signal(SIGINT, signalHandler);
 
+    // --- Load config ---
+    loadConfig("config.txt", CFG);
+
     // --- Lidar ---
-    LidarController lidar("/dev/ttyUSB0", FLIP_LIDAR);
+    LidarController lidar(CFG.lidarPort, CFG.flipLidar);
+    lidar.setExcludeZones(CFG.lidarExclude);
     if (!lidar.initialize()) {
         std::cerr << "Failed to initialize lidar\n";
         return -1;
     }
 
     // --- Camera ---
-    CamController cam(0, CAMWIDTH, CAMHEIGHT);
-    cam.addTrackedColor("red",    0,   10,  100, 100, 170, 180, 100, 100);
-    cam.addTrackedColor("purple", 130, 160, 100, 100, 130, 160, 100, 100);
-    cam.setFlip(FLIP_CAMERA);
+    CamController cam(0, CFG.camWidth, CFG.camHeight);
+    for (const auto& c : CFG.colors)
+        cam.addTrackedColor(c.name,
+            c.lHueMin, c.lHueMax, c.lSatMin, c.lValMin,
+            c.uHueMin, c.uHueMax, c.uSatMin, c.uValMin);
+    cam.setFlip(CFG.flipCamera);
     cam.setTrackingStrategy(CamController::TrackingStrategy::LARGEST);
-    cam.setMinArea(MIN_AREA);
-    cam.setDeadOnThreshold(DEAD_ON_THRESH);
+    cam.setMinArea(CFG.minArea);
+    cam.setDeadOnThreshold(CFG.deadOnThresh);
     if (!cam.initialize()) {
         std::cerr << "Failed to initialize camera\n";
         return -1;
     }
-    cam.enableStreaming(true, STREAM_PORT);
-    std::cout << "MJPEG stream : http://<your-pi-ip>:" << STREAM_PORT << "\n";
+    cam.enableStreaming(true, CFG.streamPort);
+    std::cout << "MJPEG stream : http://<your-pi-ip>:" << CFG.streamPort << "\n";
 
     // --- Motor (wire into MotorBus) ---
-    MotorController motor("/dev/ttyUSB1");
+    MotorController motor(CFG.motorPort);
     if (!motor.isOpen()) {
-        std::cerr << "Warning: MotorController failed to open /dev/ttyUSB1 — motor commands will be ignored\n";
+        std::cerr << "Warning: MotorController failed to open " << CFG.motorPort
+                  << " — motor commands will be ignored\n";
     } else {
         motor.eStop();
     }
-    global_motor_bus.hw = &motor;   // <-- bus now owns the hardware ref
+    global_motor_bus.hw = &motor;
 
     // --- Threads ---
     std::thread t_lidar(lidarThread,  std::ref(lidar));
@@ -1206,6 +1491,67 @@ int main() {
         return x;
     });
 
+    // GET /map — occupancy grid + path + pose for the dashboard map panel
+    CROW_ROUTE(app, "/map")([&](){
+        crow::json::wvalue x;
+
+        auto pose  = global_map.getPose();
+        auto path  = global_map.getPath();
+        auto cloud = global_map.getCloud();
+        auto grid  = global_map.getGrid();
+
+        // Pose
+        x["pose"]["x"]   = pose.x;
+        x["pose"]["y"]   = pose.y;
+        x["pose"]["yaw"] = pose.yaw;
+
+        // Path (trail) — send every point (front-end will decimate if needed)
+        for (size_t i = 0; i < path.size(); i++) {
+            x["path"][i]["x"] = path[i].x;
+            x["path"][i]["y"] = path[i].y;
+        }
+
+        // Point cloud — downsample to max 4000 pts for JSON size
+        size_t step = std::max((size_t)1, cloud.size() / 4000);
+        size_t ci   = 0;
+        for (size_t i = 0; i < cloud.size(); i += step) {
+            x["cloud"][ci]["x"] = cloud[i].x();
+            x["cloud"][ci]["y"] = cloud[i].y();
+            ci++;
+        }
+
+        // Occupancy grid metadata + cells (RLE-encoded: [value, count] pairs)
+        x["grid"]["width"]   = grid.width;
+        x["grid"]["height"]  = grid.height;
+        x["grid"]["res"]     = grid.res;
+        x["grid"]["originX"] = grid.originX;
+        x["grid"]["originY"] = grid.originY;
+
+        // RLE encode cells to keep JSON small
+        crow::json::wvalue rle;
+        size_t ri = 0;
+        size_t gi = 0;
+        while (gi < grid.cells.size()) {
+            int8_t val   = grid.cells[gi];
+            size_t count = 1;
+            while (gi + count < grid.cells.size() && grid.cells[gi+count] == val && count < 255)
+                count++;
+            rle[ri]["v"] = (int)val;
+            rle[ri]["n"] = (int)count;
+            ri++;
+            gi += count;
+        }
+        x["grid"]["rle"] = std::move(rle);
+
+        return x;
+    });
+
+    // POST /map/reset — clear map and re-zero pose
+    CROW_ROUTE(app, "/map/reset").methods(crow::HTTPMethod::POST)([&](){
+        global_map.reset();
+        return crow::response(200, "ok");
+    });
+
     // POST /brain — { "enable": 0|1 }  toggle autonomous mode
     CROW_ROUTE(app, "/brain").methods(crow::HTTPMethod::POST)([&](const crow::request& req){
         auto body = crow::json::load(req.body);
@@ -1229,8 +1575,8 @@ int main() {
         return crow::response(200, "ok");
     });
 
-    std::cout << "Dashboard    : http://<your-pi-ip>:" << WEB_PORT << "\n";
-    app.port(WEB_PORT).multithreaded().run();
+    std::cout << "Dashboard    : http://<your-pi-ip>:" << CFG.webPort << "\n";
+    app.port(CFG.webPort).multithreaded().run();
 
     // Shutdown
     running = false;
