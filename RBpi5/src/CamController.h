@@ -39,7 +39,7 @@ public:
         cv::Point2f center;
         double area;
         cv::Rect boundingBox;
-        std::string colorName;  // Which color was detected
+        std::string colorName;
     };
     
     struct Direction {
@@ -70,7 +70,15 @@ public:
     void setFlip(bool flip);
     bool isFlipped() const;
 
-    // Multi-color tracking functions
+    // ── Collection zone guide lines ────────────────────────────────────────
+    // Set normalised (0.0–1.0) X positions for the two purple guide lines
+    // that show where the cup needs to be before the robot drives over it.
+    // Pass values from RobotConfig::brainCollectXMin / brainCollectXMax.
+    void  setCollectionZone(float xMin, float xMax);
+    float getCollectionZoneMin() const { return collectXMin_; }
+    float getCollectionZoneMax() const { return collectXMax_; }
+
+    // Multi-color tracking
     bool addTrackedColor(const std::string& name, 
                         int lowerHueMin, int lowerHueMax, int lowerSatMin, int lowerValMin,
                         int upperHueMin, int upperHueMax, int upperSatMin, int upperValMin);
@@ -89,10 +97,9 @@ public:
     int getStreamPort() const;
     
 private:
-   
     cv::VideoCapture cap;
     cv::Mat currentFrame;
-    std::vector<cv::Mat> colorMasks;  // One mask per tracked color
+    std::vector<cv::Mat> colorMasks;
     std::vector<RedObject> detectedObjects;
     
     int cameraIndex;
@@ -101,7 +108,6 @@ private:
     double minArea;
     double deadOnThreshold;
     
-    // Map of color name to color ranges
     std::map<std::string, ColorRange> trackedColors;
     static const int MAX_TRACKED_COLORS = 3;
     
@@ -115,6 +121,10 @@ private:
     std::thread streamThread;
     std::mutex frameMutex;
     cv::Mat streamFrame;
+
+    // Collection zone line positions (normalised 0..1)
+    float collectXMin_ = 0.55f;
+    float collectXMax_ = 0.75f;
     
     void detectColorPixels();
     std::vector<RedObject> findColorObjects();

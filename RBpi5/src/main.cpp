@@ -3,6 +3,7 @@
 #include "MotorController.h"
 #include "MapController.h"
 #include "Config.h"
+#include "Brain.h"
 #include "crow_all.h"
 #include <iostream>
 #include <vector>
@@ -15,8 +16,6 @@
 #include <string>
 
 // ===== CONFIGURATION =====
-// All values loaded from config.txt at startup.
-// Defaults are defined in Config.h.
 RobotConfig CFG;
 // =========================
 
@@ -30,11 +29,17 @@ std::vector<LidarPoint> global_scan;
 std::mutex              scan_mutex;
 
 struct TrackingState {
-    double      angle       = 0.0;
-    double      distance    = 0.0;
-    int         objectCount = 0;
-    std::string command     = "NO TARGET";
-    int         actual_fps  = 0;
+    double      angle        = 0.0;
+    double      distance     = 0.0;
+    int         objectCount  = 0;
+    std::string command      = "NO TARGET";
+    int         actual_fps   = 0;
+
+    // Pixel-space fields for Brain COLLECT logic
+    double      targetPixelX = -1.0;   // centre-x of chosen target (-1 = none)
+    double      targetPixelY = -1.0;
+    double      targetArea   = 0.0;    // contour area in pixels²
+    int         frameWidth   = 640;
 };
 TrackingState global_tracking;
 std::mutex    tracking_mutex;
@@ -46,33 +51,30 @@ MapController global_map;
 std::mutex    map_mutex;
 
 // ══════════════════════════════════════════════════════════════════
-//  MotorCommand — what any controller (manual or brain) wants
+//  MotorCommand
 // ══════════════════════════════════════════════════════════════════
 
+#ifndef MOTOR_COMMAND_DEFINED
+#define MOTOR_COMMAND_DEFINED
 struct MotorCommand {
     bool   cmd_enable = true;
-    int    direction  = 90;   // compass degrees, 0-359 (90 = forward)
-    int    turn       = 0;    // 0=none 1=left 2=right
-    int    speed      = 0;    // 0-100 %
+    int    direction  = 90;
+    int    turn       = 0;
+    int    speed      = 0;
     bool   pickup     = false;
 };
+#endif
 
 // ══════════════════════════════════════════════════════════════════
-//  MotorBus — single point of truth for the physical motor
-//  Any thread calls drive() / eStop(); it serialises access.
+//  MotorBus
 // ══════════════════════════════════════════════════════════════════
 
 struct MotorBus {
-    MotorController*        hw      = nullptr;  // set after HW init
+    MotorController*        hw      = nullptr;
     mutable std::mutex      mtx;
 
-    // Last commanded state (readable by dashboard)
     MotorCommand            last_cmd;
     bool                    estopped = false;
-
-    // Which source is in control
-    // "manual"  — Crow /motor route
-    // "brain"   — autonomous brainThread
     std::string             source   = "manual";
 
     void drive(const MotorCommand& cmd, const std::string& src) {
@@ -109,14 +111,14 @@ struct MotorBus {
 MotorBus global_motor_bus;
 
 // ══════════════════════════════════════════════════════════════════
-//  BrainState — what the autonomous brain is doing (for dashboard)
+//  BrainState
 // ══════════════════════════════════════════════════════════════════
 
 struct BrainState {
     bool        enabled     = false;
-    std::string mode        = "IDLE";   // IDLE / SEEK / CHASE / AVOID
+    std::string mode        = "IDLE";
     std::string reason      = "";
-    float       front_clear = 0.0f;     // closest obstacle in front arc (m)
+    float       front_clear = 0.0f;
 };
 BrainState  global_brain;
 std::mutex  brain_mutex;
@@ -142,7 +144,6 @@ void lidarThread(LidarController& lidar) {
                 std::lock_guard<std::mutex> lk(scan_mutex);
                 global_scan = scan;
             }
-            // Feed into KISS-ICP map (runs in lidar thread — no extra thread needed)
             global_map.update(scan);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -177,13 +178,28 @@ void cameraThread(CamController& cam) {
             global_tracking.actual_fps = fps;
         }
 
-        CamController::Direction dir = cam.getDirection();
+        CamController::Direction dir     = cam.getDirection();
+        auto                     objects = cam.getDetectedObjects();
+
         {
             std::lock_guard<std::mutex> lk(tracking_mutex);
             global_tracking.angle       = dir.angle;
             global_tracking.distance    = dir.distance;
             global_tracking.objectCount = dir.objectCount;
             global_tracking.command     = dir.command;
+            global_tracking.frameWidth  = CFG.camWidth;
+
+            // Find the largest object for the COLLECT pixel-space check
+            global_tracking.targetPixelX = -1.0;
+            global_tracking.targetPixelY = -1.0;
+            global_tracking.targetArea   = 0.0;
+            for (const auto& obj : objects) {
+                if (obj.area > global_tracking.targetArea) {
+                    global_tracking.targetArea   = obj.area;
+                    global_tracking.targetPixelX = obj.center.x;
+                    global_tracking.targetPixelY = obj.center.y;
+                }
+            }
         }
 
         auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -193,22 +209,26 @@ void cameraThread(CamController& cam) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-//  Brain thread  — autonomous controller
+//  Brain thread  — delegates to Brain class in Brain.h
 //
-//  Priority stack (highest wins):
-//    1. E-stopped          → hold still
-//    2. Obstacle too close → AVOID (turn away from obstacle)
-//    3. Target visible     → CHASE (steer toward camera bearing)
-//    4. No target          → SEEK  (slow spin to find target)
+//  State machine (priority order):
+//    1. E-stop active          → IDLE
+//    2. Obstacle < clearDist   → AVOID
+//    3. Target close (area ≥ brain_collect_dist) → COLLECT
+//       Phase A: sidestep left until cup centre is between purple lines
+//       Phase B: drive straight forward with pickup=true
+//    4. Target visible (far)   → CHASE
+//    5. No target              → SEEK
 // ══════════════════════════════════════════════════════════════════
 
 void brainThread() {
     const auto period = std::chrono::milliseconds(1000 / CFG.brainHz);
 
+    Brain brain(CFG);
+
     while (running) {
         auto t0 = std::chrono::steady_clock::now();
 
-        // ── Check if brain is enabled ──
         {
             std::lock_guard<std::mutex> lk(brain_mutex);
             if (!global_brain.enabled) {
@@ -219,75 +239,36 @@ void brainThread() {
 
         // ── Read sensor snapshots ──
         std::vector<LidarPoint> scan;
-        { std::lock_guard<std::mutex> lk(scan_mutex);    scan     = global_scan; }
+        { std::lock_guard<std::mutex> lk(scan_mutex);     scan = global_scan; }
 
-        TrackingState tracking;
-        { std::lock_guard<std::mutex> lk(tracking_mutex); tracking = global_tracking; }
+        TrackingState ts;
+        { std::lock_guard<std::mutex> lk(tracking_mutex); ts = global_tracking; }
 
         bool estopped;
         { std::lock_guard<std::mutex> lk(global_motor_bus.mtx); estopped = global_motor_bus.estopped; }
 
-        // ── Obstacle detection — front arc ──
-        float front_closest = 9999.f;
-        float worst_angle   = 0.f;   // angle of nearest obstacle (for avoidance)
-        for (auto& p : scan) {
-            // Normalise angle relative to forward (90°), map to -180..+180
-            float rel = p.angle - 90.f;
-            while (rel >  180.f) rel -= 360.f;
-            while (rel < -180.f) rel += 360.f;
-            if (std::abs(rel) < CFG.brainFrontArc && p.range < front_closest) {
-                front_closest = p.range;
-                worst_angle   = rel;
-            }
-        }
+        // ── Build TrackingSnapshot for Brain ──
+        TrackingSnapshot snap;
+        snap.angle        = ts.angle;
+        snap.distance     = ts.distance;
+        snap.objectCount  = ts.objectCount;
+        snap.command      = ts.command;
+        snap.targetPixelX = ts.targetPixelX;
+        snap.targetPixelY = ts.targetPixelY;
+        snap.targetArea   = ts.targetArea;
+        snap.frameWidth   = ts.frameWidth;
 
-        // ── Decide mode + command ──
-        MotorCommand cmd;
-        std::string  mode, reason;
+        // ── Tick ──
+        BrainOutput out = brain.tick(estopped, scan, snap);
 
-        if (estopped) {
-            mode   = "IDLE";
-            reason = "e-stop active";
-            cmd.speed = 0; cmd.cmd_enable = false;
-
-        } else if (front_closest < CFG.brainClearDist) {
-            // AVOID — turn away from obstacle
-            mode   = "AVOID";
-            reason = "obstacle at " + std::to_string((int)(front_closest * 100)) + "cm";
-            cmd.speed     = CFG.brainAvoidSpeed;
-            cmd.direction = 90;                       // keep heading forward
-            // Turn away from the side the obstacle is on
-            cmd.turn = (worst_angle > 0) ? 2 : 1;    // 1=left, 2=right
-
-        } else if (tracking.objectCount > 0) {
-            // CHASE — steer toward target bearing
-            mode   = "CHASE";
-            reason = "target at " + std::to_string((int)tracking.angle) + "deg";
-            cmd.speed = CFG.brainChaseSpeed;
-            // Convert camera bearing (-90..+90) to drive direction (0..359)
-            // Positive angle = target to the right → turn right
-            int heading = 90 + static_cast<int>(tracking.angle);
-            heading = ((heading % 360) + 360) % 360;
-            cmd.direction = heading;
-            cmd.turn      = 0;
-
-        } else {
-            // SEEK — slow rotation to find a target
-            mode   = "SEEK";
-            reason = "no target visible";
-            cmd.speed     = CFG.brainSeekSpeed;
-            cmd.direction = 90;
-            cmd.turn      = 1; // spin left (arbitrary, could alternate)
-        }
-
-        // ── Publish command ──
-        global_motor_bus.drive(cmd, "brain");
+        // ── Publish ──
+        global_motor_bus.drive(out.cmd, "brain");
 
         {
             std::lock_guard<std::mutex> lk(brain_mutex);
-            global_brain.mode        = mode;
-            global_brain.reason      = reason;
-            global_brain.front_clear = (front_closest > 99.f) ? -1.f : front_closest;
+            global_brain.mode        = out.mode;
+            global_brain.reason      = out.reason;
+            global_brain.front_clear = out.frontClear;
         }
 
         std::this_thread::sleep_until(t0 + period);
@@ -312,6 +293,7 @@ static const std::string DASHBOARD_HTML = R"html(
     --warn:    #ff3d5a;
     --ok:      #39ff84;
     --dim:     #4a6080;
+    --collect: #cc00ff;
     --mono:    'Share Tech Mono', monospace;
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -408,9 +390,10 @@ static const std::string DASHBOARD_HTML = R"html(
     flex-shrink: 0;
     transition: background .2s, box-shadow .2s;
   }
-  .bdot.seek  { background: var(--warn); box-shadow: 0 0 5px var(--warn); }
-  .bdot.chase { background: var(--ok);   box-shadow: 0 0 5px var(--ok); }
-  .bdot.avoid { background: var(--warn); box-shadow: 0 0 5px var(--warn); }
+  .bdot.seek    { background: var(--warn);    box-shadow: 0 0 5px var(--warn); }
+  .bdot.chase   { background: var(--ok);      box-shadow: 0 0 5px var(--ok); }
+  .bdot.avoid   { background: var(--warn);    box-shadow: 0 0 5px var(--warn); }
+  .bdot.collect { background: var(--collect); box-shadow: 0 0 5px var(--collect); }
   #hdr-mode-lbl { transition: color .2s; }
 
   /* ── Top row ── */
@@ -544,14 +527,14 @@ static const std::string DASHBOARD_HTML = R"html(
   .sbox  { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 8px 12px; }
   .slbl  { font-family: var(--mono); font-size: .52rem; color: var(--dim); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 3px; }
   .sval  { font-family: var(--mono); font-size: 1.3rem; color: var(--accent); text-shadow: 0 0 8px rgba(0,229,255,.35); transition: color .2s, text-shadow .2s; }
-  .sval.ok   { color: var(--ok);   text-shadow: 0 0 8px rgba(57,255,132,.35); }
-  .sval.warn { color: var(--warn); text-shadow: 0 0 8px rgba(255,61,90,.35); }
-  .sval.dim  { color: var(--dim);  text-shadow: none; }
+  .sval.ok      { color: var(--ok);      text-shadow: 0 0 8px rgba(57,255,132,.35); }
+  .sval.warn    { color: var(--warn);    text-shadow: 0 0 8px rgba(255,61,90,.35); }
+  .sval.dim     { color: var(--dim);     text-shadow: none; }
+  .sval.collect { color: var(--collect); text-shadow: 0 0 8px rgba(204,0,255,.35); }
   .bottom-row-inner { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; }
   .compass { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
   .ctrack  { width: 100%; height: 5px; background: var(--border); border-radius: 3px; position: relative; }
   #needle  { position: absolute; width: 11px; height: 11px; background: var(--accent); border-radius: 50%; top: -3px; left: 50%; transform: translateX(-50%); box-shadow: 0 0 8px var(--accent); transition: left .12s ease; }
-  .clabels { display: flex; justify-content: space-between; font-family: var(--mono); font-size: .5rem; color: var(--dim); }
   .cmdbox  { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 3px; padding: 8px 14px; font-family: var(--mono); font-size: .9rem; letter-spacing: .07em; color: var(--ok); white-space: nowrap; display: flex; align-items: center; transition: color .2s, border-color .2s; }
 
   /* Status panel */
@@ -568,8 +551,8 @@ static const std::string DASHBOARD_HTML = R"html(
   .sp-title { font-family: var(--mono); font-size: .54rem; color: var(--dim); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 4px; }
   .sp-row   { display: flex; justify-content: space-between; align-items: center; font-family: var(--mono); font-size: .62rem; color: var(--dim); margin-top: 4px; }
   .sp-val   { color: #c8ddef; }
-  .sp-val.ok   { color: var(--ok); }
-  .sp-val.warn { color: var(--warn); }
+  .sp-val.ok      { color: var(--ok); }
+  .sp-val.warn    { color: var(--warn); }
 
   /* brain mode badge */
   .mode-badge {
@@ -579,9 +562,10 @@ static const std::string DASHBOARD_HTML = R"html(
     transition: color .2s, border-color .2s, background .2s;
     text-align: center;
   }
-  .mode-badge.seek  { color: var(--warn);   border-color: var(--warn);   background: rgba(255,61,90,.08); }
-  .mode-badge.chase { color: var(--ok);     border-color: var(--ok);     background: rgba(57,255,132,.08); }
-  .mode-badge.avoid { color: var(--accent); border-color: var(--accent); background: rgba(0,229,255,.08); }
+  .mode-badge.seek    { color: var(--warn);    border-color: var(--warn);    background: rgba(255,61,90,.08); }
+  .mode-badge.chase   { color: var(--ok);      border-color: var(--ok);      background: rgba(57,255,132,.08); }
+  .mode-badge.avoid   { color: var(--accent);  border-color: var(--accent);  background: rgba(0,229,255,.08); }
+  .mode-badge.collect { color: var(--collect); border-color: var(--collect); background: rgba(204,0,255,.08); }
 
   /* pickup toggle */
   .mc-toggle { width: 38px; height: 20px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); position: relative; cursor: pointer; transition: background .15s, border-color .15s; flex-shrink: 0; }
@@ -658,14 +642,12 @@ static const std::string DASHBOARD_HTML = R"html(
 <header>
   <h1>// SENTINEL</h1>
 
-  <!-- 3-state mode selector -->
   <div class="mode-group">
     <button class="mode-btn active-off" id="btn-off"  onclick="setMode('off')">&#9632; OFF</button>
     <button class="mode-btn"            id="btn-man"  onclick="setMode('manual')">&#9654; MANUAL</button>
     <button class="mode-btn"            id="btn-auto" onclick="setMode('auto')">&#9681; AUTO</button>
   </div>
 
-  <!-- live brain status (shown when in auto mode) -->
   <div class="brain-strip">
     <div class="bdot" id="hdr-bdot"></div>
     <span id="hdr-mode-lbl">IDLE</span>
@@ -675,7 +657,6 @@ static const std::string DASHBOARD_HTML = R"html(
   <span id="pill">&#9679; LIVE</span>
 </header>
 
-<!-- Single unified view -->
 <div id="top-row">
   <div id="lidar-panel">
     <span class="lbl">LIDAR — 360° SCAN</span>
@@ -692,11 +673,9 @@ static const std::string DASHBOARD_HTML = R"html(
     </div>
   </div>
 
-  <!-- D-pad -->
   <div id="dpad-panel">
     <span class="lbl">DRIVE CONTROL</span>
 
-    <!-- Speed slider -->
     <div style="width:100%;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
         <span class="lbl" style="align-self:auto;">SPEED</span>
@@ -705,7 +684,6 @@ static const std::string DASHBOARD_HTML = R"html(
       <input type="range" id="dp-slider" min="0" max="100" value="50" step="1" style="width:100%;accent-color:var(--accent);">
     </div>
 
-    <!-- D-pad buttons -->
     <div class="dpad">
       <div></div>
       <button class="dp-btn" id="dp-fwd"   title="Forward [↑]">&#8593;</button>
@@ -726,10 +704,8 @@ static const std::string DASHBOARD_HTML = R"html(
   </div>
 </div>
 
-<!-- Bottom row -->
 <div id="bottom-row">
 
-  <!-- Tracking stats -->
   <div id="stats-panel">
     <span class="lbl">TRACKING DATA</span>
     <div class="sgrid">
@@ -749,7 +725,6 @@ static const std::string DASHBOARD_HTML = R"html(
     </div>
   </div>
 
-  <!-- Status / motor panel -->
   <div id="status-panel">
 
     <div>
@@ -787,7 +762,6 @@ static const std::string DASHBOARD_HTML = R"html(
   </div>
 </div>
 
-<!-- Map panel -->
 <div id="map-panel">
   <div id="map-toolbar">
     <span class="lbl">SLAM MAP — KISS-ICP</span>
@@ -893,10 +867,8 @@ static const std::string DASHBOARD_HTML = R"html(
   const pickupTog = document.getElementById('pickup-toggle');
   const pickupLbl = document.getElementById('pickup-lbl');
 
-  // Which direction buttons are currently physically held
   const held = { fwd: false, back: false, left: false, right: false, turnLeft: false, turnRight: false };
 
-  // ─── Mode button styling ───
   function applyModeBtnStyle(mode) {
     document.getElementById('btn-off').className  = 'mode-btn' + (mode==='off'    ? ' active-off'  : '');
     document.getElementById('btn-man').className  = 'mode-btn' + (mode==='manual' ? ' active-man'  : '');
@@ -935,23 +907,12 @@ static const std::string DASHBOARD_HTML = R"html(
   // ─── Speed slider ───
   dpSlider.addEventListener('input', () => {
     dpSpdLbl.textContent = dpSlider.value;
-    if (anyHeld()) sendCurrentHeld(); // update live if driving
+    if (anyHeld()) sendCurrentHeld();
   });
 
   function getSpeed() { return parseInt(dpSlider.value); }
   function anyHeld()  { return held.fwd || held.back || held.left || held.right || held.turnLeft || held.turnRight; }
 
-  // ─── Compute and send based on what's held ───
-  // direction = 0  → stopped
-  // direction = 90 → forward
-  //
-  // left/right alone  → turn in place (direction=90, turn=1/2)
-  // fwd  + right      → diagonal 45°
-  // fwd  + left       → diagonal 135°
-  // back + right      → diagonal 315°
-  // back + left       → diagonal 225°
-  // fwd  only         → 90°
-  // back only         → 270°
   function sendCurrentHeld() {
     if (currentMode !== 'manual') return;
     if (!anyHeld()) {
@@ -960,7 +921,6 @@ static const std::string DASHBOARD_HTML = R"html(
       ms.turn      = 0;
     } else {
       ms.speed = getSpeed();
-      // Direction — resolved independently from turn
       if      (held.fwd  && held.right) ms.direction = 45;
       else if (held.right && held.back) ms.direction = 135;
       else if (held.back  && held.left) ms.direction = 225;
@@ -970,7 +930,6 @@ static const std::string DASHBOARD_HTML = R"html(
       else if (held.back)               ms.direction = 180;
       else if (held.left)               ms.direction = 270;
       else                              ms.direction = 0;
-      // Turn — resolved independently, stacks with any direction
       if      (held.turnRight)          ms.turn = 2;
       else if (held.turnLeft)           ms.turn = 1;
       else                              ms.turn = 0;
@@ -987,7 +946,6 @@ static const std::string DASHBOARD_HTML = R"html(
     if (currentMode === 'manual') sendMotor();
   }
 
-  // ─── D-pad: momentary — hold = move, release = stop ───
   Object.entries(dpBtns).forEach(([dir, btn]) => {
     function press(e) {
       e.preventDefault();
@@ -1009,7 +967,6 @@ static const std::string DASHBOARD_HTML = R"html(
     btn.addEventListener('touchcancel', release);
   });
 
-  // ─── Turn buttons: sticky toggle ───
   function setTurn(val) {
     if (currentMode !== 'manual') return;
     ms.turn = val;
@@ -1019,7 +976,6 @@ static const std::string DASHBOARD_HTML = R"html(
   }
   Object.entries(dpTurnBtns).forEach(([v,b]) => b.addEventListener('click', () => setTurn(parseInt(v))));
 
-  // ─── Pickup toggle ───
   pickupTog.addEventListener('click', () => {
     if (currentMode !== 'manual') return;
     ms.pickup = !ms.pickup;
@@ -1028,9 +984,6 @@ static const std::string DASHBOARD_HTML = R"html(
     syncDisplay(); sendMotor();
   });
 
-  // ─── Keyboard: arrows + A/D = momentary hold, Space = off ───
-  // Arrow left/right → pure direction (no turn)
-  // A / D            → turn in place only (no direction strafe)
   const keysHeld = {};
   const arrowToDir = { ArrowUp:'fwd', ArrowDown:'back', ArrowLeft:'left', ArrowRight:'right' };
 
@@ -1041,10 +994,8 @@ static const std::string DASHBOARD_HTML = R"html(
     if (k === ' ') { setMode('off'); return; }
     if (keysHeld[k]) return;
     keysHeld[k] = true;
-
     if (k==='a'||k==='A') { held.turnLeft  = true;  sendCurrentHeld(); return; }
     if (k==='d'||k==='D') { held.turnRight = true;  sendCurrentHeld(); return; }
-
     const dir = arrowToDir[k];
     if (dir) {
       held[dir] = true;
@@ -1066,8 +1017,6 @@ static const std::string DASHBOARD_HTML = R"html(
     }
   });
 
-
-  // ─── Display sync ───
   function syncDisplay() {
     dpSpdLbl.textContent = ms.speed;
     Object.entries(dpTurnBtns).forEach(([v,b]) => b.classList.toggle('active', parseInt(v)===ms.turn));
@@ -1098,24 +1047,21 @@ static const std::string DASHBOARD_HTML = R"html(
     } catch(e) {}
   }
 
-
   // ─── Poll /motor/state for live status panel ───
   async function fetchMotorState() {
     try {
       const d = await (await fetch('/motor/state')).json();
 
-      // Sync mode if server disagrees (e.g. estop from another client)
       const serverBrain = d.brain_enabled===1;
       if (serverBrain && currentMode!=='auto')   { currentMode='auto';   applyModeBtnStyle('auto');   setManualControlsEnabled(false); }
       if (!serverBrain && d.estopped===1 && currentMode!=='off') { currentMode='off'; applyModeBtnStyle('off'); setManualControlsEnabled(false); }
 
-      // Status panel
       document.getElementById('sp-spd').textContent  = d.speed + '%';
       document.getElementById('sp-dir').textContent  = d.direction + '°';
       document.getElementById('sp-turn').textContent = ['STRAIGHT','LEFT','RIGHT'][d.turn] || '—';
       document.getElementById('sp-src').textContent  = (d.source||'—').toUpperCase();
 
-      // Brain badge
+      // Brain badge — now also handles COLLECT (purple)
       const bm = (d.brain_mode||'IDLE').toUpperCase();
       const badge = document.getElementById('sp-brain-mode');
       badge.textContent = bm;
@@ -1153,18 +1099,15 @@ static const std::string DASHBOARD_HTML = R"html(
   const mapCanvas = document.getElementById('map-canvas');
   const mapCtx    = mapCanvas.getContext('2d');
 
-  // View state
-  let mapZoom = 40;        // pixels per metre
+  let mapZoom = 40;
   let mapPanX = 0;
   let mapPanY = 0;
   let mapDragging = false;
   let mapDragStart = {};
 
-  // Decoded occupancy grid (cached so we only re-decode when data changes)
   let cachedGrid   = null;
-  let cachedBitmap = null;   // OffscreenCanvas with drawn grid
+  let cachedBitmap = null;
 
-  // Resize canvas to fill its CSS size
   function resizeMapCanvas() {
     mapCanvas.width  = mapCanvas.offsetWidth;
     mapCanvas.height = mapCanvas.offsetHeight;
@@ -1172,23 +1115,19 @@ static const std::string DASHBOARD_HTML = R"html(
   resizeMapCanvas();
   window.addEventListener('resize', () => { resizeMapCanvas(); drawMap(); });
 
-  // World → canvas pixel
   function w2c(wx, wy) {
     const cx = mapCanvas.width  / 2 + mapPanX;
     const cy = mapCanvas.height / 2 + mapPanY;
     return { x: cx + wx * mapZoom, y: cy - wy * mapZoom };
   }
 
-  // Draw everything
   function drawMap(data) {
     const W = mapCanvas.width, H = mapCanvas.height;
     mapCtx.clearRect(0, 0, W, H);
 
-    // Background
     mapCtx.fillStyle = '#060a0d';
     mapCtx.fillRect(0, 0, W, H);
 
-    // Grid lines (1 m spacing)
     mapCtx.strokeStyle = '#1a2d45';
     mapCtx.lineWidth   = 0.5;
     const gridStep = mapZoom;
@@ -1199,13 +1138,10 @@ static const std::string DASHBOARD_HTML = R"html(
 
     if (!data) return;
 
-    // ── Occupancy grid ──
     if (data.grid && data.grid.rle && data.grid.width > 0) {
       const g   = data.grid;
-      const res = g.res;       // metres per cell
-      const cpx = mapZoom * res;  // canvas pixels per cell
-
-      // Top-left canvas pixel of cell (0,0)
+      const res = g.res;
+      const cpx = mapZoom * res;
       const o = w2c(g.originX, g.originY + g.height * res);
 
       for (let ri = 0, ci = 0, row = 0, col = 0; ri < g.rle.length; ri++) {
@@ -1224,7 +1160,6 @@ static const std::string DASHBOARD_HTML = R"html(
       }
     }
 
-    // ── Point cloud ──
     if (data.cloud && data.cloud.length > 0) {
       mapCtx.fillStyle = 'rgba(57,255,132,0.6)';
       for (const p of data.cloud) {
@@ -1233,7 +1168,6 @@ static const std::string DASHBOARD_HTML = R"html(
       }
     }
 
-    // ── Trail ──
     if (data.path && data.path.length > 1) {
       mapCtx.strokeStyle = 'rgba(255,170,0,0.7)';
       mapCtx.lineWidth   = 1.5;
@@ -1247,16 +1181,14 @@ static const std::string DASHBOARD_HTML = R"html(
       mapCtx.stroke();
     }
 
-    // ── Robot ──
     if (data.pose) {
       const rp  = w2c(data.pose.x, data.pose.y);
-      const yaw = data.pose.yaw;   // radians
+      const yaw = data.pose.yaw;
       const r   = 10;
 
-      // Body
       mapCtx.save();
       mapCtx.translate(rp.x, rp.y);
-      mapCtx.rotate(-yaw);   // canvas y-axis is flipped
+      mapCtx.rotate(-yaw);
       mapCtx.strokeStyle = '#00e5ff';
       mapCtx.lineWidth   = 2;
       mapCtx.shadowBlur  = 10;
@@ -1264,28 +1196,24 @@ static const std::string DASHBOARD_HTML = R"html(
       mapCtx.beginPath();
       mapCtx.arc(0, 0, r, 0, Math.PI * 2);
       mapCtx.stroke();
-      // Heading arrow
       mapCtx.beginPath();
       mapCtx.moveTo(0, 0);
       mapCtx.lineTo(r + 6, 0);
       mapCtx.stroke();
       mapCtx.restore();
 
-      // Pose label
       const deg = (data.pose.yaw * 180 / Math.PI).toFixed(1);
       document.getElementById('map-pose-lbl').textContent =
         `x: ${data.pose.x.toFixed(2)}  y: ${data.pose.y.toFixed(2)}  θ: ${deg}°`;
     }
 
-    // Origin cross
     const op = w2c(0, 0);
     mapCtx.strokeStyle = '#4a6080';
     mapCtx.lineWidth   = 1;
     mapCtx.beginPath(); mapCtx.moveTo(op.x-8,op.y); mapCtx.lineTo(op.x+8,op.y); mapCtx.stroke();
     mapCtx.beginPath(); mapCtx.moveTo(op.x,op.y-8); mapCtx.lineTo(op.x,op.y+8); mapCtx.stroke();
 
-    // Scale bar (bottom-left)
-    const barM  = niceBarLen(5 / mapZoom);   // target ~5% of width
+    const barM  = niceBarLen(5 / mapZoom);
     const barPx = barM * mapZoom;
     mapCtx.strokeStyle = '#4a6080'; mapCtx.lineWidth = 2;
     mapCtx.beginPath(); mapCtx.moveTo(14, H-14); mapCtx.lineTo(14+barPx, H-14); mapCtx.stroke();
@@ -1298,7 +1226,6 @@ static const std::string DASHBOARD_HTML = R"html(
     return niceVals.reduce((p,x) => Math.abs(x-target)<Math.abs(p-target)?x:p);
   }
 
-  // Fit view to show all path points
   function mapFitView() {
     if (!lastMapData || !lastMapData.path || lastMapData.path.length < 2) return;
     let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
@@ -1321,7 +1248,6 @@ static const std::string DASHBOARD_HTML = R"html(
     drawMap(null);
   }
 
-  // Pan & zoom interactions
   mapCanvas.addEventListener('wheel', e => {
     e.preventDefault();
     mapZoom = Math.max(5, Math.min(200, mapZoom * (e.deltaY < 0 ? 1.15 : 1/1.15)));
@@ -1341,7 +1267,6 @@ static const std::string DASHBOARD_HTML = R"html(
   window.addEventListener('mouseup', () => { mapDragging=false; mapCanvas.style.cursor='grab'; });
   mapCanvas.addEventListener('dblclick', mapResetZoom);
 
-  // Poll /map every 500 ms
   let lastMapData = null;
   async function fetchMap() {
     try {
@@ -1362,7 +1287,7 @@ static const std::string DASHBOARD_HTML = R"html(
 // ---------- main ----------
 int main() {
     signal(SIGINT, signalHandler);
-
+	signal(SIGPIPE, SIG_IGN);
     // --- Load config ---
     loadConfig("config.txt", CFG);
 
@@ -1384,6 +1309,8 @@ int main() {
     cam.setTrackingStrategy(CamController::TrackingStrategy::LARGEST);
     cam.setMinArea(CFG.minArea);
     cam.setDeadOnThreshold(CFG.deadOnThresh);
+    // Set the purple collection zone guide lines from config
+    cam.setCollectionZone(CFG.brainCollectXMin, CFG.brainCollectXMax);
     if (!cam.initialize()) {
         std::cerr << "Failed to initialize camera\n";
         return -1;
@@ -1391,7 +1318,7 @@ int main() {
     cam.enableStreaming(true, CFG.streamPort);
     std::cout << "MJPEG stream : http://<your-pi-ip>:" << CFG.streamPort << "\n";
 
-    // --- Motor (wire into MotorBus) ---
+    // --- Motor ---
     MotorController motor(CFG.motorPort);
     if (!motor.isOpen()) {
         std::cerr << "Warning: MotorController failed to open " << CFG.motorPort
@@ -1411,7 +1338,6 @@ int main() {
 
     CROW_ROUTE(app, "/")([&](){ return DASHBOARD_HTML; });
 
-    // GET /data — lidar scan
     CROW_ROUTE(app, "/data")([&](){
         crow::json::wvalue x;
         std::lock_guard<std::mutex> lk(scan_mutex);
@@ -1422,7 +1348,6 @@ int main() {
         return x;
     });
 
-    // GET /tracking — camera tracking state
     CROW_ROUTE(app, "/tracking")([&](){
         crow::json::wvalue x;
         std::lock_guard<std::mutex> lk(tracking_mutex);
@@ -1434,8 +1359,6 @@ int main() {
         return x;
     });
 
-    // POST /motor — manual drive command { cmd, direction, turn, speed, pickup }
-    //   Only accepted when brain is disabled; rejected otherwise.
     CROW_ROUTE(app, "/motor").methods(crow::HTTPMethod::POST)([&](const crow::request& req){
         {
             std::lock_guard<std::mutex> lk(brain_mutex);
@@ -1446,17 +1369,16 @@ int main() {
         if (!body) return crow::response(400, "bad json");
 
         MotorCommand cmd;
-        cmd.cmd_enable = body["cmd"].i()       != 0;
+        cmd.cmd_enable = body["cmd"].i()    != 0;
         cmd.direction  = body["direction"].i();
         cmd.turn       = body["turn"].i();
         cmd.speed      = body["speed"].i();
-        cmd.pickup     = body["pickup"].i()    != 0;
+        cmd.pickup     = body["pickup"].i() != 0;
 
         global_motor_bus.drive(cmd, "manual");
         return crow::response(200, "ok");
     });
 
-    // POST /motor/estop — emergency stop (always accepted, kills brain too)
     CROW_ROUTE(app, "/motor/estop").methods(crow::HTTPMethod::POST)([&](){
         {
             std::lock_guard<std::mutex> lk(brain_mutex);
@@ -1467,7 +1389,6 @@ int main() {
         return crow::response(200, "ok");
     });
 
-    // GET /motor/state — current motor state + brain state
     CROW_ROUTE(app, "/motor/state")([&](){
         crow::json::wvalue x;
         auto cmd = global_motor_bus.getLastCmd();
@@ -1491,7 +1412,6 @@ int main() {
         return x;
     });
 
-    // GET /map — occupancy grid + path + pose for the dashboard map panel
     CROW_ROUTE(app, "/map")([&](){
         crow::json::wvalue x;
 
@@ -1500,18 +1420,15 @@ int main() {
         auto cloud = global_map.getCloud();
         auto grid  = global_map.getGrid();
 
-        // Pose
         x["pose"]["x"]   = pose.x;
         x["pose"]["y"]   = pose.y;
         x["pose"]["yaw"] = pose.yaw;
 
-        // Path (trail) — send every point (front-end will decimate if needed)
         for (size_t i = 0; i < path.size(); i++) {
             x["path"][i]["x"] = path[i].x;
             x["path"][i]["y"] = path[i].y;
         }
 
-        // Point cloud — downsample to max 4000 pts for JSON size
         size_t step = std::max((size_t)1, cloud.size() / 4000);
         size_t ci   = 0;
         for (size_t i = 0; i < cloud.size(); i += step) {
@@ -1520,14 +1437,12 @@ int main() {
             ci++;
         }
 
-        // Occupancy grid metadata + cells (RLE-encoded: [value, count] pairs)
         x["grid"]["width"]   = grid.width;
         x["grid"]["height"]  = grid.height;
         x["grid"]["res"]     = grid.res;
         x["grid"]["originX"] = grid.originX;
         x["grid"]["originY"] = grid.originY;
 
-        // RLE encode cells to keep JSON small
         crow::json::wvalue rle;
         size_t ri = 0;
         size_t gi = 0;
@@ -1546,13 +1461,11 @@ int main() {
         return x;
     });
 
-    // POST /map/reset — clear map and re-zero pose
     CROW_ROUTE(app, "/map/reset").methods(crow::HTTPMethod::POST)([&](){
         global_map.reset();
         return crow::response(200, "ok");
     });
 
-    // POST /brain — { "enable": 0|1 }  toggle autonomous mode
     CROW_ROUTE(app, "/brain").methods(crow::HTTPMethod::POST)([&](const crow::request& req){
         auto body = crow::json::load(req.body);
         if (!body) return crow::response(400, "bad json");
@@ -1564,7 +1477,6 @@ int main() {
             global_brain.reason  = enable ? "just enabled" : "disabled by user";
         }
         if (!enable) {
-            // Hand back to manual — send a safe stop
             MotorCommand stop;
             stop.speed = 0;
             global_motor_bus.drive(stop, "manual");

@@ -44,13 +44,36 @@ struct RobotConfig {
     // Web dashboard
     int webPort = 8080;
 
-    // Brain
+    // Brain — general
     int   brainHz         = 10;
     float brainClearDist  = 0.6f;
     int   brainChaseSpeed = 45;
     int   brainSeekSpeed  = 30;
     int   brainAvoidSpeed = 35;
     float brainFrontArc   = 40.0f;
+
+    // Brain — cup collection
+    //   brainCollectDist  : pixel-area threshold (px²) at which the robot
+    //                        switches from CHASE → COLLECT.  Tune this so it
+    //                        triggers when the cup fills roughly the bottom
+    //                        quarter of the frame.
+    double brainCollectDist  = 8000.0;
+
+    //   brainCollectXMin/Max : normalised (0–1) horizontal window on the camera
+    //                          frame.  The robot sidestepping left until the cup
+    //                          centre falls within this band, then drives forward
+    //                          to scoop.  The collector is on the RIGHT side of
+    //                          the robot, so the window sits right-of-centre.
+    //                          Purple guide lines are drawn at these positions on
+    //                          the MJPEG stream.
+    float brainCollectXMin   = 0.55f;   // ~55 % from left edge
+    float brainCollectXMax   = 0.75f;   // ~75 % from left edge
+
+    //   brainSidestepSpeed : motor speed (0-100) used while side-stepping left
+    int   brainSidestepSpeed = 25;
+
+    //   brainDriveSpeed    : motor speed (0-100) used for the final drive-over
+    int   brainDriveSpeed    = 30;
 };
 
 // Load config from file. Returns true on success.
