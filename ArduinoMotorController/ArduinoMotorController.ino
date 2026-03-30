@@ -19,7 +19,7 @@ const float MAX_RPM_LIMIT = 80.0;
 
 // Servo Settings
 const int SERVO_STOP = 80;  
-const int SERVO_RUN = 50;
+const int SERVO_RUN = 70;
 
 int encoderDirection[4] = { -1, -1, 1, 1 }; 
 double targetRPMs[4] = { 0, 0, 0, 0 }; 
@@ -54,41 +54,69 @@ void loop() {
 
 void readSerialData() {
   if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n'); 
-    input.trim(); 
+    // We kijken naar het eerste byte zonder het te verwijderen ('peek')
+    char firstByte = Serial.peek();
 
-    if (input.length() > 0) {
-      int values[5]; 
-      int count = 0;
-      int startPos = 0;
-      int commaPos = input.indexOf(','); 
-      
-      while (commaPos != -1 && count < 4) {
-        values[count++] = input.substring(startPos, commaPos).toInt(); 
-        startPos = commaPos + 1; 
-        commaPos = input.indexOf(',', startPos); 
+    // Methode 1: Tekstgebaseerde data (begint vaak met een cijfer 0-9)
+    if (isDigit(firstByte) || firstByte == '-') {
+      String input = Serial.readStringUntil('\n');
+      input.trim();
+
+      if (input.length() > 0) {
+        int values[5];
+        int count = 0;
+        int startPos = 0;
+        int commaPos = input.indexOf(',');
+
+        while (commaPos != -1 && count < 4) {
+          values[count++] = input.substring(startPos, commaPos).toInt();
+          startPos = commaPos + 1;
+          commaPos = input.indexOf(',', startPos);
+        }
+        values[count] = input.substring(startPos).toInt();
+
+        // Verwerk de waarden
+        processCommand(values[0], values[1], values[2], values[3], values[4]);
       }
-      values[count] = input.substring(startPos).toInt(); 
+    } 
+    // Methode 2: Binair pakket (3 bytes)
+    else if (Serial.available() >= 3) {
+      uint32_t packet = 0;
+      packet |= (uint32_t)Serial.read() << 16;
+      packet |= (uint32_t)Serial.read() << 8;
+      packet |= (uint32_t)Serial.read();
 
-      bool cmd_enable = values[0]; 
-      int direction   = values[1]; 
-      int turn_val    = values[2]; 
-      int speed_val   = values[3]; 
-      bool pickup     = values[4]; 
+      // Bits uitpakken
+      bool cmd_enable = (packet >> 19) & 0x01;
+      int direction   = (packet >> 10) & 0x1FF; // 0-360 graden
+      int turn_val    = (packet >> 8)  & 0x03;  // 0=stop, 1=links, 2=rechts
+      int speed_val   = (packet >> 1)  & 0x7F;  // 0-100%
+      bool pickup     = (packet)       & 0x01;  // Bit 0
 
-      // Servo Control logic
-      if (cmd_enable && pickup) {
-        pickupServo->writeServo(SERVO_RUN); 
-      } else {
-        pickupServo->writeServo(SERVO_STOP); 
-      }
-
-      if (!cmd_enable) {
-        stopAllMotors(); 
-      } else {
-        calculateMecanum(direction, turn_val, speed_val); 
-      }
+      // Verwerk de waarden
+      processCommand(cmd_enable, direction, turn_val, speed_val, pickup);
     }
+    else {
+      // Als er iets anders binnenkomt dat we niet herkennen, 
+      // gooien we 1 byte weg om de buffer schoon te houden.
+      Serial.read();
+    }
+  }
+}
+
+void processCommand(bool cmd_enable, int direction, int turn_val, int speed_val, bool pickup) {
+  // Servo aansturing met de juiste pointer-notatie (->)
+  if (cmd_enable && pickup) {
+    pickupServo->writeServo(SERVO_RUN); 
+  } else {
+    pickupServo->writeServo(SERVO_STOP);
+  }
+
+  // Motor aansturing
+  if (!cmd_enable) {
+    stopAllMotors();
+  } else {
+    calculateMecanum(direction, turn_val, speed_val);
   }
 }
 
