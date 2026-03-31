@@ -19,14 +19,14 @@
 
 class CamController {
 public:
-    
+
     enum class TrackingStrategy {
         LARGEST,
         CLOSEST_TO_CENTER,
         LEFTMOST,
         LOWEST
     };
-    
+
     struct ColorRange {
         std::string name;
         cv::Scalar lowerMin;
@@ -34,25 +34,24 @@ public:
         cv::Scalar upperMin;
         cv::Scalar upperMax;
     };
-    
+
     struct RedObject {
         cv::Point2f center;
         double area;
         cv::Rect boundingBox;
         std::string colorName;
     };
-    
+
     struct Direction {
         double angle;
         std::string command;
         double distance;
         int objectCount;
     };
-    
-    
+
     CamController(int cameraIndex = 0, int width = 640, int height = 480);
     ~CamController();
-    
+
     bool initialize();
     bool captureFrame();
     Direction getDirection();
@@ -70,67 +69,68 @@ public:
     void setFlip(bool flip);
     bool isFlipped() const;
 
-    // ── Collection zone guide lines ────────────────────────────────────────
-    // Set normalised (0.0–1.0) X positions for the two purple guide lines
-    // that show where the cup needs to be before the robot drives over it.
-    // Pass values from RobotConfig::brainCollectXMin / brainCollectXMax.
+    // Collection zone guide lines
     void  setCollectionZone(float xMin, float xMax);
     float getCollectionZoneMin() const { return collectXMin_; }
     float getCollectionZoneMax() const { return collectXMax_; }
 
     // Multi-color tracking
-    bool addTrackedColor(const std::string& name, 
-                        int lowerHueMin, int lowerHueMax, int lowerSatMin, int lowerValMin,
-                        int upperHueMin, int upperHueMax, int upperSatMin, int upperValMin);
+    bool addTrackedColor(const std::string& name,
+                         int lowerHueMin, int lowerHueMax, int lowerSatMin, int lowerValMin,
+                         int upperHueMin, int upperHueMax, int upperSatMin, int upperValMin);
     bool removeTrackedColor(const std::string& name);
     bool hasColor(const std::string& name) const;
     int getColorCount() const;
     std::vector<std::string> getColorNames() const;
     void clearAllColors();
-    
-    // Legacy red color setter (deprecated but kept for compatibility)
+
+    // Legacy red color setters
     void setRedRangeLower(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
     void setRedRangeUpper(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
 
     void enableStreaming(bool enable, int port = 8080);
     bool isStreamingEnabled() const;
     int getStreamPort() const;
-    
+
 private:
     cv::VideoCapture cap;
     cv::Mat currentFrame;
-    std::vector<cv::Mat> colorMasks;
     std::vector<RedObject> detectedObjects;
-    
+
     int cameraIndex;
     int frameWidth;
     int frameHeight;
     double minArea;
     double deadOnThreshold;
-    
+
     std::map<std::string, ColorRange> trackedColors;
     static const int MAX_TRACKED_COLORS = 3;
-    
+
     TrackingStrategy strategy;
-    
+
     FILE* cameraStream;
     bool useRpiCam;
-    
+
     std::atomic<bool> streamingEnabled;
     int streamPort;
     std::thread streamThread;
     std::mutex frameMutex;
-    cv::Mat streamFrame;
 
     // Collection zone line positions (normalised 0..1)
     float collectXMin_ = 0.55f;
     float collectXMax_ = 0.75f;
-    
+
+    // Pre-allocated working Mats — reused every frame to avoid heap churn
+    cv::Mat hsvFrame_;       // BGR->HSV conversion target
+    cv::Mat combinedMask_;   // union of all colour masks
+    cv::Mat tmpMask_;        // scratch for each inRange call
+
+    bool flip180;
+
     void detectColorPixels();
     std::vector<RedObject> findColorObjects();
     Direction analyzeColorObjects();
     void drawVisualization(cv::Mat& frame);
-    bool flip180;
     void streamingLoop();
 };
 

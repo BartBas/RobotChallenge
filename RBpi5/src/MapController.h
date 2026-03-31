@@ -4,10 +4,11 @@
 #include <vector>
 #include <deque>
 #include <mutex>
+#include <unordered_map>
 #include <Eigen/Core>
 #include <Eigen/SVD>
-#include "LidarController.h"
 #include <Eigen/LU>
+#include "LidarController.h"
 
 struct Pose2D {
     double x   = 0.0;
@@ -74,11 +75,14 @@ private:
         transform2D(const std::vector<Eigen::Vector2d>& pts,
                     double tx, double ty, double yaw);
 
-    // Occupancy grid helpers (same as before)
+    // Occupancy grid helpers
     void raycastIntoGrid(const Pose2D& pose,
                          const std::vector<Eigen::Vector2d>& pts);
     void ensureGridCovers(double wx, double wy);
     bool worldToCell(double wx, double wy, int& col, int& row) const;
+
+    // Memory management — merges cloud_ points that share a voxel cell
+    void voxelFilterCloud();
 };
 
 #endif // MAP_CONTROLLER_H

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iostream>
 #include <limits>
+#include <unordered_map>
 
 // ─── constructor ────────────────────────────────────────────────────
 MapController::MapController(double res_m, double max_range, size_t max_path)
@@ -80,11 +81,47 @@ void MapController::update(const std::vector<LidarPoint>& scan)
         double wy = pose_.y + s * p.x() + c * p.y();
         cloud_.emplace_back(wx, wy, 0.0);
     }
-    if (cloud_.size() > 1'000'000)
-        cloud_.erase(cloud_.begin(), cloud_.begin() + 200'000);
+
+    // Voxel-filter every 20 updates (~2 s at 10 Hz) to keep memory flat.
+    // This merges nearby points into one per cell — map fidelity is preserved
+    // because the occupancy grid holds the real obstacle data.
+    static int cloudUpdateCount = 0;
+    if (++cloudUpdateCount >= 20) {
+        cloudUpdateCount = 0;
+        voxelFilterCloud();
+    }
 
     // ── Occupancy grid ────────────────────────────────────────────
     raycastIntoGrid(pose_, pts);
+}
+
+// ─── voxelFilterCloud ───────────────────────────────────────────────
+// Merges all cloud_ points that fall in the same 10 cm voxel cell into
+// a single representative point.  Keeps memory bounded without losing
+// structural map detail (the occupancy grid has the real data anyway).
+void MapController::voxelFilterCloud()
+{
+    const double voxel = 0.10;  // 10 cm — tune larger to save more RAM
+
+    std::unordered_map<uint64_t, Eigen::Vector3d> cells;
+    cells.reserve(cloud_.size());
+
+    for (const auto& p : cloud_) {
+        // Map world coords to integer voxel indices
+        int64_t ix = static_cast<int64_t>(std::floor(p.x() / voxel));
+        int64_t iy = static_cast<int64_t>(std::floor(p.y() / voxel));
+        // Pack into a single 64-bit key (32 bits each, offset to handle negatives)
+        uint64_t key = ((uint64_t)((ix + 0x7FFFFFFF) & 0xFFFFFFFF) << 32) |
+                        (uint64_t)((iy + 0x7FFFFFFF) & 0xFFFFFFFF);
+        cells[key] = p;  // last point in each cell wins
+    }
+
+    cloud_.clear();
+    cloud_.reserve(cells.size());
+    for (const auto& kv : cells)
+        cloud_.push_back(kv.second);
+
+    std::cout << "[MapController] Cloud voxel-filtered → " << cloud_.size() << " points\n";
 }
 
 // ─── accessors ──────────────────────────────────────────────────────
@@ -169,7 +206,8 @@ bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
         // Apply current estimate to source points
         auto moved = transform2D(s, tx, ty, yaw);
 
-        // Find nearest neighbour in ref for each moved point (brute force — fast enough at 200 pts)
+        // Find nearest neighbour in ref for each moved point
+        // (brute force — fast enough at 200 pts)
         std::vector<Eigen::Vector2d> srcPts, dstPts;
         srcPts.reserve(moved.size());
         dstPts.reserve(moved.size());
@@ -250,6 +288,12 @@ bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
 // ─── ensureGridCovers ───────────────────────────────────────────────
 void MapController::ensureGridCovers(double wx, double wy)
 {
+    // Hard cap — refuse to grow beyond a 20×20 m arena.
+    // If the robot wanders further, lidar points outside this zone are simply
+    // not raycast into the grid (they're still used for ICP / odometry).
+    const double MAX_EXTENT = 20.0;
+    if (std::abs(wx) > MAX_EXTENT || std::abs(wy) > MAX_EXTENT) return;
+
     double x0 = grid_.originX, y0 = grid_.originY;
     double x1 = x0 + grid_.width  * grid_.res;
     double y1 = y0 + grid_.height * grid_.res;
@@ -257,10 +301,10 @@ void MapController::ensureGridCovers(double wx, double wy)
     const double pad = 5.0;
     bool grow = false;
 
-    if (wx < x0 + pad) { grid_.originX -= pad; grid_.width  += (int)(pad/grid_.res); grow = true; }
-    if (wy < y0 + pad) { grid_.originY -= pad; grid_.height += (int)(pad/grid_.res); grow = true; }
-    if (wx > x1 - pad) { grid_.width  += (int)(pad/grid_.res); grow = true; }
-    if (wy > y1 - pad) { grid_.height += (int)(pad/grid_.res); grow = true; }
+    if (wx < x0 + pad) { grid_.originX -= pad; grid_.width  += (int)(pad / grid_.res); grow = true; }
+    if (wy < y0 + pad) { grid_.originY -= pad; grid_.height += (int)(pad / grid_.res); grow = true; }
+    if (wx > x1 - pad) { grid_.width   += (int)(pad / grid_.res); grow = true; }
+    if (wy > y1 - pad) { grid_.height  += (int)(pad / grid_.res); grow = true; }
 
     if (grow) {
         grid_.cells.assign(grid_.width * grid_.height, 0);
@@ -298,23 +342,23 @@ void MapController::raycastIntoGrid(const Pose2D& pose,
         if (!worldToCell(wx, wy, ec, er)) continue;
 
         // Bresenham ray from robot cell to hit cell
-        int x0=rc, y0=rr, x1=ec, y1=er;
-        int dx=std::abs(x1-x0), dy=std::abs(y1-y0);
-        int sx=(x0<x1)?1:-1, sy=(y0<y1)?1:-1;
-        int err=dx-dy;
+        int x0 = rc, y0 = rr, x1 = ec, y1 = er;
+        int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0);
+        int sx = (x0 < x1) ? 1 : -1, sy = (y0 < y1) ? 1 : -1;
+        int err = dx - dy;
 
         while (true) {
-            if (x0==x1 && y0==y1) {
-                int idx = y0*grid_.width + x0;
-                if (idx>=0 && idx<(int)grid_.cells.size())
+            if (x0 == x1 && y0 == y1) {
+                int idx = y0 * grid_.width + x0;
+                if (idx >= 0 && idx < (int)grid_.cells.size())
                     grid_.cells[idx] = 2;   // OCCUPIED
                 break;
             }
-            int idx = y0*grid_.width + x0;
-            if (idx>=0 && idx<(int)grid_.cells.size() && grid_.cells[idx] != 2)
+            int idx = y0 * grid_.width + x0;
+            if (idx >= 0 && idx < (int)grid_.cells.size() && grid_.cells[idx] != 2)
                 grid_.cells[idx] = 1;       // FREE
 
-            int e2 = 2*err;
+            int e2 = 2 * err;
             if (e2 > -dy) { err -= dy; x0 += sx; }
             if (e2 <  dx) { err += dx; y0 += sy; }
         }

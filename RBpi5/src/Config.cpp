@@ -57,6 +57,7 @@ bool loadConfig(const std::string& path, RobotConfig& cfg)
         else if (key == "min_area")                cfg.minArea             = std::stod(val);
         else if (key == "dead_on_thresh")          cfg.deadOnThresh        = std::stod(val);
         else if (key == "web_port")                cfg.webPort             = std::stoi(val);
+        else if (key == "ws_port") 				   cfg.wsPort 			   = std::stoi(val);
         else if (key == "brain_hz")                cfg.brainHz             = std::stoi(val);
         else if (key == "brain_clear_dist")        cfg.brainClearDist      = std::stof(val);
         else if (key == "brain_chase_speed")       cfg.brainChaseSpeed     = std::stoi(val);
@@ -69,6 +70,7 @@ bool loadConfig(const std::string& path, RobotConfig& cfg)
         else if (key == "brain_collect_x_max")     cfg.brainCollectXMax    = std::stof(val);
         else if (key == "brain_sidestep_speed")    cfg.brainSidestepSpeed  = std::stoi(val);
         else if (key == "brain_drive_speed")       cfg.brainDriveSpeed     = std::stoi(val);
+        else if (key == "brain_drive_over_ms")     cfg.brainDriveOverMs    = std::stoi(val);
 
         else if (key == "lidar_exclude") {
             std::istringstream ss(val);

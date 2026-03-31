@@ -1,4 +1,5 @@
 #include "MotorController.h"
+#include <iomanip>
 
 MotorController::MotorController(const std::string& portName) {
     serial_port = open(portName.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
@@ -72,7 +73,23 @@ bool MotorController::sendPacket(bool cmd_enable, int direction,
         (uint8_t)( packet        & 0xFF)
     };
 
-    return write(serial_port, bytes, 3) == 3;
+    const char* turnStr = (turn == TurnDirection::LEFT)  ? "LEFT"  :
+                          (turn == TurnDirection::RIGHT) ? "RIGHT" : "NONE";
+    std::cout << "[MotorController] TX"
+              << "  cmd="  << (cmd_enable ? 1 : 0)
+              << "  dir="  << direction   << "deg"
+              << "  turn=" << turnStr
+              << "  spd="  << speed       << "%"
+              << "  pick=" << (pickup ? 1 : 0)
+              << "  raw=0x" << std::hex << std::uppercase
+              << std::setw(2) << std::setfill('0') << (int)bytes[0]
+              << std::setw(2) << std::setfill('0') << (int)bytes[1]
+              << std::setw(2) << std::setfill('0') << (int)bytes[2]
+              << std::dec << std::endl;
+
+    bool ok = write(serial_port, bytes, 3) == 3;
+    if (!ok) std::cerr << "[MotorController] write() failed: " << strerror(errno) << std::endl;
+    return ok;
 }
 
 bool MotorController::sendRaw(const std::string& cmd) {

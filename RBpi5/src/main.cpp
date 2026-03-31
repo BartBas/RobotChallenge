@@ -76,11 +76,13 @@ struct MotorBus {
     MotorCommand            last_cmd;
     bool                    estopped = false;
     std::string             source   = "manual";
+    uint64_t                seq      = 0;   // incremented on every drive() call
 
     void drive(const MotorCommand& cmd, const std::string& src) {
         std::lock_guard<std::mutex> lk(mtx);
         last_cmd = cmd;
         source   = src;
+        seq++;
         if (!hw || !hw->isOpen()) return;
         if (!cmd.cmd_enable) { hw->eStop(); return; }
         MotorController::TurnDirection td = MotorController::TurnDirection::NONE;
@@ -144,7 +146,11 @@ void lidarThread(LidarController& lidar) {
                 std::lock_guard<std::mutex> lk(scan_mutex);
                 global_scan = scan;
             }
-            global_map.update(scan);
+            // Skip expensive ICP/map update when brain is off (manual / off mode).
+            // The scan is still stored above so the radar display stays fresh.
+            bool brainOn;
+            { std::lock_guard<std::mutex> lk(brain_mutex); brainOn = global_brain.enabled; }
+            if (brainOn) global_map.update(scan);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -825,7 +831,12 @@ static const std::string DASHBOARD_HTML = R"html(
 
   // ─── Sensor polling ───
   function sv(id,text,cls){const el=document.getElementById(id); el.textContent=text; if(cls!==null) el.className='sval '+(cls||'');}
-  async function fetchLidar(){try{const d=await(await fetch('/data')).json(); drawRadar(d); document.getElementById('pt-count').textContent=d.length+' pts'; sv('s-pts',d.length,null);}catch(e){}}
+  async function fetchLidar(){
+    try{const d=await(await fetch('/data')).json(); drawRadar(d); document.getElementById('pt-count').textContent=d.length+' pts'; sv('s-pts',d.length,null);}catch(e){}
+    // In manual mode the radar is just for situational awareness — poll slowly
+    // to keep the HTTP thread pool free for motor commands.
+    setTimeout(fetchLidar, currentMode === 'manual' ? 1500 : 500);
+  }
   async function fetchTracking(){
     try{
       const d=await(await fetch('/tracking')).json();
@@ -840,9 +851,12 @@ static const std::string DASHBOARD_HTML = R"html(
       cmd.style.borderLeftColor=isF?'var(--ok)':isN?'var(--dim)':'var(--warn)';
       document.getElementById('needle').style.left=Math.max(0,Math.min(100,((d.angle+90)/180)*100))+'%';
     }catch(e){}
+    // In manual mode tracking data isn't driving decisions — poll slowly.
+    setTimeout(fetchTracking, currentMode === 'manual' ? 1000 : 300);
   }
-  function sensorLoop(){fetchLidar(); fetchTracking(); setTimeout(sensorLoop,100);}
-  sensorLoop();
+  // Each fetch waits for response before scheduling next — no pile-up
+  fetchLidar();
+  fetchTracking();
 
   // ══════════════════════════════════════════
   // ─── Mode: 'off' | 'manual' | 'auto' ───
@@ -884,20 +898,21 @@ static const std::string DASHBOARD_HTML = R"html(
     pickupTog.style.opacity       = on ? '' : '0.35';
   }
 
-  async function setMode(mode) {
+  function setMode(mode) {
     if (mode === currentMode) return;
     currentMode = mode;
     applyModeBtnStyle(mode);
     releaseAll();
     if (mode === 'off') {
       setManualControlsEnabled(false);
-      await fetch('/motor/estop', {method:'POST'});
+      fetch('/motor/estop', {method:'POST'}).catch(()=>{});
     } else if (mode === 'manual') {
       setManualControlsEnabled(true);
-      await fetch('/brain', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enable:0})});
+      // Fire-and-forget — don't await so the controls are live immediately
+      fetch('/brain', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enable:0})}).catch(()=>{});
     } else if (mode === 'auto') {
       setManualControlsEnabled(false);
-      await fetch('/brain', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enable:1})});
+      fetch('/brain', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enable:1})}).catch(()=>{});
     }
   }
 
@@ -943,7 +958,7 @@ static const std::string DASHBOARD_HTML = R"html(
     Object.values(dpBtns).forEach(b => b.classList.remove('pressed'));
     ms.speed = 0; ms.direction = 0; ms.turn = 0;
     syncDisplay();
-    if (currentMode === 'manual') sendMotor();
+    sendMotor();
   }
 
   Object.entries(dpBtns).forEach(([dir, btn]) => {
@@ -972,7 +987,6 @@ static const std::string DASHBOARD_HTML = R"html(
     ms.turn = val;
     Object.entries(dpTurnBtns).forEach(([v,b]) => b.classList.toggle('active', parseInt(v)===val));
     syncDisplay();
-    if (anyHeld()) sendMotor();
   }
   Object.entries(dpTurnBtns).forEach(([v,b]) => b.addEventListener('click', () => setTurn(parseInt(v))));
 
@@ -981,7 +995,7 @@ static const std::string DASHBOARD_HTML = R"html(
     ms.pickup = !ms.pickup;
     pickupTog.classList.toggle('on', ms.pickup);
     pickupLbl.textContent = ms.pickup ? 'ON' : 'OFF';
-    syncDisplay(); sendMotor();
+    syncDisplay();
   });
 
   const keysHeld = {};
@@ -1037,15 +1051,35 @@ static const std::string DASHBOARD_HTML = R"html(
     return [(p>>16)&0xFF,(p>>8)&0xFF,p&0xFF];
   }
 
-  async function sendMotor() {
-    if (currentMode !== 'manual') return;
-    try {
-      await fetch('/motor', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({cmd:ms.cmd, direction:ms.direction, turn:ms.turn, speed:ms.speed, pickup:ms.pickup?1:0})
-      });
-    } catch(e) {}
+// ─── Motor WebSocket — persistent connection for low-latency manual control ──
+let motorWs = null;
+let motorWsReady = false;
+
+function openMotorWs() {
+  // Dedicated WS port (ws_port in config.txt) — isolated from HTTP/MJPEG traffic.
+  const url = `ws://${window.location.hostname}:8082/ws/motor`;
+  motorWs = new WebSocket(url);
+  motorWs.onopen  = () => { motorWsReady = true;  console.log('[WS] motor connected'); };
+  motorWs.onclose = () => { motorWsReady = false; console.log('[WS] motor closed — reconnecting in 1s'); setTimeout(openMotorWs, 1000); };
+  motorWs.onerror = () => { motorWsReady = false; motorWs.close(); };
+}
+openMotorWs();
+
+function sendMotor() {
+  const payload = JSON.stringify({
+    cmd:       currentMode === 'off' ? 0 : ms.cmd,
+    direction: ms.direction,
+    turn:      ms.turn,
+    speed:     currentMode === 'off' ? 0 : ms.speed,
+    pickup:    ms.pickup ? 1 : 0
+  });
+  if (motorWsReady && motorWs && motorWs.readyState === WebSocket.OPEN) {
+    motorWs.send(payload);   // <5 ms — persistent connection, no handshake
+  } else {
+    // Fallback to HTTP if WebSocket isn't up yet
+    fetch('/motor', { method:'POST', headers:{'Content-Type':'application/json'}, body: payload }).catch(()=>{});
   }
+}
 
   // ─── Poll /motor/state for live status panel ───
   async function fetchMotorState() {
@@ -1088,8 +1122,9 @@ static const std::string DASHBOARD_HTML = R"html(
         fcEl.className = 'sp-val '+(fc<0.6?'warn':'ok');
       }
     } catch(e){}
+    setTimeout(fetchMotorState, 800);  // ~1.2 Hz — wait for response first
   }
-  setInterval(fetchMotorState, 400);
+  fetchMotorState();
 
   syncDisplay();
 
@@ -1274,7 +1309,8 @@ static const std::string DASHBOARD_HTML = R"html(
       lastMapData = d;
       drawMap(d);
     } catch(e) {}
-    setTimeout(fetchMap, 500);
+    // Map data only matters in auto mode — poll very slowly in manual.
+    setTimeout(fetchMap, currentMode === 'manual' ? 5000 : 2000);
   }
   fetchMap();
 
@@ -1374,7 +1410,6 @@ int main() {
         cmd.turn       = body["turn"].i();
         cmd.speed      = body["speed"].i();
         cmd.pickup     = body["pickup"].i() != 0;
-
         global_motor_bus.drive(cmd, "manual");
         return crow::response(200, "ok");
     });
@@ -1487,7 +1522,52 @@ int main() {
         return crow::response(200, "ok");
     });
 
+    // ── Dedicated WebSocket app — motor commands only ─────────────────────
+    // Runs on CFG.wsPort (default 8082), completely isolated from the dashboard
+    // HTTP / MJPEG traffic on CFG.webPort.  Nothing else shares this port, so
+    // motor commands are never queued behind a slow JSON or image response.
+    crow::SimpleApp wsApp;
+
+    CROW_WEBSOCKET_ROUTE(wsApp, "/ws/motor")
+        .onopen([&](crow::websocket::connection& conn){
+            std::cout << "[WS] motor client connected\n";
+            (void)conn;
+        })
+        .onclose([&](crow::websocket::connection& conn, const std::string&, uint16_t){
+            // Stop the robot if the controlling client disconnects.
+            std::cout << "[WS] motor client disconnected — stopping\n";
+            MotorCommand stop;
+            stop.speed = 0;
+            global_motor_bus.drive(stop, "ws-disconnect");
+            (void)conn;
+        })
+        .onmessage([&](crow::websocket::connection& /*conn*/,
+                        const std::string& data, bool /*is_binary*/){
+            // Reject commands while brain is active
+            {
+                std::lock_guard<std::mutex> lk(brain_mutex);
+                if (global_brain.enabled) return;
+            }
+            auto body = crow::json::load(data);
+            if (!body) return;
+            MotorCommand cmd;
+            cmd.cmd_enable = body["cmd"].i()    != 0;
+            cmd.direction  = body["direction"].i();
+            cmd.turn       = body["turn"].i();
+            cmd.speed      = body["speed"].i();
+            cmd.pickup     = body["pickup"].i() != 0;
+            global_motor_bus.drive(cmd, "manual");
+        });
+
     std::cout << "Dashboard    : http://<your-pi-ip>:" << CFG.webPort << "\n";
+    std::cout << "Motor WS     : ws://<your-pi-ip>:"   << CFG.wsPort  << "/ws/motor\n";
+
+    // Run the WS app in its own thread — never blocks the dashboard.
+    wsApp.loglevel(crow::LogLevel::WARNING);
+    auto wsFuture = wsApp.port(CFG.wsPort).multithreaded().run_async();
+
+    // Dashboard app blocks the main thread until shutdown.
+    app.loglevel(crow::LogLevel::WARNING);
     app.port(CFG.webPort).multithreaded().run();
 
     // Shutdown

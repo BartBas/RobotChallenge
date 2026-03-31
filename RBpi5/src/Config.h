@@ -41,8 +41,9 @@ struct RobotConfig {
     double minArea      = 200.0;
     double deadOnThresh = 5.0;
 
-    // Web dashboard
+    // Web dashboard port and manual WS port
     int webPort = 8080;
+    int wsPort = 8082;
 
     // Brain — general
     int   brainHz         = 10;
@@ -74,6 +75,14 @@ struct RobotConfig {
 
     //   brainDriveSpeed    : motor speed (0-100) used for the final drive-over
     int   brainDriveSpeed    = 30;
+
+    //   brainDriveOverMs   : how long (milliseconds) to drive forward blindly
+    //                        during the drive-over phase.  The camera loses the
+    //                        cup as soon as the robot passes over it, so this
+    //                        timer keeps the robot moving until the cup is fully
+    //                        inside the water-wheel collector.
+    //                        Start with ~1500 ms and tune from there.
+    int   brainDriveOverMs   = 1500;
 };
 
 // Load config from file. Returns true on success.
