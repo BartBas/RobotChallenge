@@ -128,9 +128,9 @@ void calculateMecanum(int degrees, int turn_val, int speed_val) {
 
   float targetSpeedRPM = (speed_val / 100.0) * MAX_RPM_LIMIT; 
   float x = 0, y = 0, t = 0;
-  float rad = (degrees * PI) / 180.0; 
+  float rad = ((90 - degrees) * PI) / 180.0; 
   
-  x = cos(rad) * targetSpeedRPM; 
+  x = -cos(rad) * targetSpeedRPM;  
   y = sin(rad) * targetSpeedRPM; 
   
   if (turn_val == 1)      t = -targetSpeedRPM; 
