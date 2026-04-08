@@ -43,68 +43,43 @@ void setup() {
     encoders[i] = new QGPMaker_Encoder(i + 1);
     motors[i]->setSpeed(0);
   }
-
-  Serial.println("--- Systeem Gereed ---");
-  Serial.println("Type commando als: enable,direction,turn,speed,pickup");
-  Serial.println("Of stuur binary: 0xFF + 3 bytes payload");
 }
 
-void loop() {
-  readSerialData();
-  updatePID();
-}
+uint8_t buffer[4];
+int indexPos = 0;
 
 void readSerialData() {
-  if (Serial.available() > 0) {
-    char firstByte = Serial.peek();
+  if (Serial.available()) {
+    uint8_t b = Serial.read(); 
 
-    // Text command: starts with digit or minus sign
-    if (isDigit(firstByte) || firstByte == '-') {
-      String input = Serial.readStringUntil('\n');
-      input.trim();
-
-      if (input.length() > 0) {
-        int values[5];
-        int count = 0;
-        int startPos = 0;
-        int commaPos = input.indexOf(',');
-
-        while (commaPos != -1 && count < 4) {
-          values[count++] = input.substring(startPos, commaPos).toInt();
-          startPos = commaPos + 1;
-          commaPos = input.indexOf(',', startPos);
-        }
-        values[count] = input.substring(startPos).toInt();
-
-        processCommand(values[0], values[1], values[2], values[3], values[4]);
+    // Packet assembler
+    if (indexPos == 0) {
+      if (b == 0xFF) {      // sync byte
+        buffer[0] = b;
+        indexPos = 1;
       }
-
-    // Binary command: must start with sync byte 0xFF
-    } else if ((uint8_t)firstByte == SYNC_BYTE) {
-      Serial.read(); // consume the sync byte
-
-      // Wait until all 3 payload bytes are available
-      if (Serial.available() >= 3) {
-        uint32_t packet = 0;
-        packet |= (uint32_t)Serial.read() << 16;
-        packet |= (uint32_t)Serial.read() << 8;
-        packet |= (uint32_t)Serial.read();
-
-        bool cmd_enable = (packet >> 19) & 0x01;
-        int  direction  = (packet >> 10) & 0x1FF;
-        int  turn_val   = (packet >> 8)  & 0x03;
-        int  speed_val  = (packet >> 1)  & 0x7F;
-        bool pickup     = (packet)       & 0x01;
-
-        processCommand(cmd_enable, direction, turn_val, speed_val, pickup);
-      }
-      // If not enough bytes yet, we already consumed the sync byte
-      // and will re-enter next loop iteration. This is safe because
-      // the Pi always sends sync + 3 bytes atomically.
-
     } else {
-      // Unknown/garbage byte — discard it and keep scanning
-      Serial.read();
+      buffer[indexPos++] = b;
+      
+      if (indexPos == 4) {
+        uint32_t longbuffer = 0;
+        
+        for (int i = 0; i < 4; i++) {
+          char hexbuf[4];
+          longbuffer |= ((uint32_t)buffer[i] & 0xFF) << (8 * (3 - i));
+        }
+        if (longbuffer != 0) {
+          char hexbuf[16];
+          bool cmd_enable = (longbuffer >> 19) & 0x01;
+          int  direction  = (longbuffer >> 10) & 0x1FF;
+          int  turn_val   = (longbuffer >> 8)  & 0x03;
+          int  speed_val  = (longbuffer >> 1)  & 0x7F;
+          bool pickup     = (longbuffer)       & 0x01;
+
+          processCommand(cmd_enable, direction, turn_val, speed_val, pickup);
+        }
+        indexPos = 0;
+      }
     }
   }
 }
@@ -141,13 +116,12 @@ void calculateMecanum(int degrees, int turn_val, int speed_val) {
   if (turn_val != 0) {
     float turnDir = (turn_val == 1) ? -1.0 : 1.0;
     if (speed_val == 0 || degrees == 0) {
-      t = turnDir * MAX_RPM_LIMIT * 0.5;  // On-axis spin
+      t = turnDir * MAX_RPM_LIMIT * 0.5;
     } else {
-      t = turnDir * (speed_val / 100.0) * MAX_RPM_LIMIT * 0.5;  // Arc turn
+      t = turnDir * (speed_val / 100.0) * MAX_RPM_LIMIT * 0.5;
     }
   }
 
-  // Applied negative signs to FL and RR to fix physical hardware inversion
   targetRPMs[0] = -(y + x + t);  // Front-Left  (Inverted)
   targetRPMs[1] =  (y - x - t);  // Front-Right
   targetRPMs[2] = -(y + x - t);  // Rear-Right  (Inverted)
@@ -206,4 +180,9 @@ void updatePID() {
     }
     motors[i]->setSpeed(finalPWM);
   }
+}
+
+void loop() {
+  readSerialData();
+  updatePID();
 }
