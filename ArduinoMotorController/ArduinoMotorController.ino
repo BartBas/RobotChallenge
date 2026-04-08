@@ -21,6 +21,9 @@ const float MAX_RPM_LIMIT = 80.0;
 const int SERVO_STOP = 80;
 const int SERVO_RUN = 70;
 
+// Sync byte for binary protocol
+const uint8_t SYNC_BYTE = 0xFF;
+
 int encoderDirection[4] = { -1, -1, 1, 1 };
 double targetRPMs[4] = { 0, 0, 0, 0 };
 double integralError[4] = { 0, 0, 0, 0 };
@@ -43,6 +46,7 @@ void setup() {
 
   Serial.println("--- Systeem Gereed ---");
   Serial.println("Type commando als: enable,direction,turn,speed,pickup");
+  Serial.println("Of stuur binary: 0xFF + 3 bytes payload");
 }
 
 void loop() {
@@ -54,6 +58,7 @@ void readSerialData() {
   if (Serial.available() > 0) {
     char firstByte = Serial.peek();
 
+    // Text command: starts with digit or minus sign
     if (isDigit(firstByte) || firstByte == '-') {
       String input = Serial.readStringUntil('\n');
       input.trim();
@@ -73,20 +78,32 @@ void readSerialData() {
 
         processCommand(values[0], values[1], values[2], values[3], values[4]);
       }
-    } else if (Serial.available() >= 3) {
-      uint32_t packet = 0;
-      packet |= (uint32_t)Serial.read() << 16;
-      packet |= (uint32_t)Serial.read() << 8;
-      packet |= (uint32_t)Serial.read();
 
-      bool cmd_enable = (packet >> 19) & 0x01;
-      int direction = (packet >> 10) & 0x1FF;
-      int turn_val = (packet >> 8) & 0x03;
-      int speed_val = (packet >> 1) & 0x7F;
-      bool pickup = (packet)&0x01;
+    // Binary command: must start with sync byte 0xFF
+    } else if ((uint8_t)firstByte == SYNC_BYTE) {
+      Serial.read(); // consume the sync byte
 
-      processCommand(cmd_enable, direction, turn_val, speed_val, pickup);
+      // Wait until all 3 payload bytes are available
+      if (Serial.available() >= 3) {
+        uint32_t packet = 0;
+        packet |= (uint32_t)Serial.read() << 16;
+        packet |= (uint32_t)Serial.read() << 8;
+        packet |= (uint32_t)Serial.read();
+
+        bool cmd_enable = (packet >> 19) & 0x01;
+        int  direction  = (packet >> 10) & 0x1FF;
+        int  turn_val   = (packet >> 8)  & 0x03;
+        int  speed_val  = (packet >> 1)  & 0x7F;
+        bool pickup     = (packet)       & 0x01;
+
+        processCommand(cmd_enable, direction, turn_val, speed_val, pickup);
+      }
+      // If not enough bytes yet, we already consumed the sync byte
+      // and will re-enter next loop iteration. This is safe because
+      // the Pi always sends sync + 3 bytes atomically.
+
     } else {
+      // Unknown/garbage byte — discard it and keep scanning
       Serial.read();
     }
   }
@@ -131,16 +148,16 @@ void calculateMecanum(int degrees, int turn_val, int speed_val) {
   }
 
   // Applied negative signs to FL and RR to fix physical hardware inversion
-  targetRPMs[0] = -(y + x + t);  // Front-Left (Inverted)
+  targetRPMs[0] = -(y + x + t);  // Front-Left  (Inverted)
   targetRPMs[1] =  (y - x - t);  // Front-Right
-  targetRPMs[2] = -(y + x - t);  // Rear-Right (Inverted)
+  targetRPMs[2] = -(y + x - t);  // Rear-Right  (Inverted)
   targetRPMs[3] =  (y - x + t);  // Rear-Left
 
   float maxVal = 0;
   for (int i = 0; i < 4; i++) {
     if (abs(targetRPMs[i]) > maxVal) maxVal = abs(targetRPMs[i]);
   }
-  
+
   if (maxVal > MAX_RPM_LIMIT) {
     for (int i = 0; i < 4; i++) {
       targetRPMs[i] = (targetRPMs[i] / maxVal) * MAX_RPM_LIMIT;
