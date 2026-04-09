@@ -74,7 +74,7 @@
  * The Raspberry Pi 5 communicates with the Arduino over Serial using a 4-byte packet:
  * - **Byte 0:** Sync Byte (\c 0xFF)
  * - **Byte 1-3:** 24-bit Payload (Enable, Direction, Turn, Speed, and Pickup bits).
- * * \subsection mapping_sub Direction Convention
+ * \subsection mapping_sub Direction Convention
  * All directions between 0 and 360 are valid and the robot will move/ strafe into that direction. For reference:
  * | Value | Direction |
  * | :--- | :--- |
@@ -102,4 +102,6 @@
  * Use the makefile \c 'make build' to compile the C++/Arduino source code.
  * \subsection step3 Step 3: Execution
  * Use the makefile \c 'make run' to initialize the sensor array and start the control loop.
+ * \subsection step4 Step 4: Control
+ * Go to <localRBip>:ConfiguredPort(default 8080) and press Auto for the robot to start driving automatically
  */

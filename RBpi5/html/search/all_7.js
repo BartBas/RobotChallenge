@@ -1,18 +1,18 @@
 var searchData=
 [
-  ['each_20scan_0',['Filtering Applied to Each Scan',['../_lidar_controller_8h.html#autotoc_md24',1,'']]],
-  ['elevated_20object_20filter_1',['Elevated-Object Filter',['../_cam_controller_8h.html#autotoc_md9',1,'']]],
-  ['elevatedareathresh_5f_2',['elevatedAreaThresh_',['../class_cam_controller.html#a30e5d8696e73dedd9ee6dd348fe9a3e6',1,'CamController']]],
-  ['elevatedythresh_5f_3',['elevatedYThresh_',['../class_cam_controller.html#a78a3c3d5a2e84347e626ff0c899942a8',1,'CamController']]],
-  ['enabled_4',['enabled',['../struct_brain_state.html#a6bd32af6423af07e132d92a3d4dcee4e',1,'BrainState']]],
-  ['enablestreaming_5',['enableStreaming',['../class_cam_controller.html#acb5e0cf4143bbd0a740475ad3f03e242',1,'CamController']]],
-  ['encoding_20sendpacket_6',['Packet Encoding (&lt;span class=&quot;tt&quot;&gt;sendPacket&lt;/span&gt;)',['../_motor_controller_8cpp.html#autotoc_md38',1,'']]],
-  ['ensuregridcovers_7',['ensureGridCovers',['../class_map_controller.html#abd0a061e269643a8daa039db5bff417d',1,'MapController']]],
-  ['environment_20setup_8',['Step 1: Environment Setup',['../index.html#step1',1,'']]],
-  ['error_20handling_9',['Error Handling',['../_config_8cpp.html#autotoc_md15',1,'']]],
-  ['estop_10',['eStop',['../struct_motor_bus.html#a39fc88433b3ce6504921813994f96f0f',1,'MotorBus::eStop()'],['../class_motor_controller.html#a702bd816790d953301427aa6af2a77d8',1,'MotorController::eStop()']]],
-  ['estopped_11',['estopped',['../struct_motor_bus.html#aee26d8b38f0895a178cff207e9faefea',1,'MotorBus']]],
-  ['excludezone_12',['ExcludeZone',['../struct_exclude_zone.html',1,'']]],
-  ['excludezones_5f_13',['excludeZones_',['../class_lidar_controller.html#aef63a2efe0c0727f4df7064c019d664f',1,'LidarController']]],
-  ['execution_14',['Step 3: Execution',['../index.html#step3',1,'']]]
+  ['dashboard_5fhtml_0',['DASHBOARD_HTML',['../main_8cpp.html#a4bcb32981a3d80cd17232d64fc8dea37',1,'main.cpp']]],
+  ['deadonthresh_1',['deadOnThresh',['../struct_robot_config.html#a70c81c90d7edb2db16591e5eb2316835',1,'RobotConfig']]],
+  ['deadonthreshold_2',['deadOnThreshold',['../class_cam_controller.html#a3832b93789246f518406a796dbd3fc04',1,'CamController']]],
+  ['detectcolorpixels_3',['detectColorPixels',['../class_cam_controller.html#a13561ab26d2202517202a11a62fb2ac7',1,'CamController']]],
+  ['detectedobjects_4',['detectedObjects',['../class_cam_controller.html#aa53f6a6a0ca18e10b9ba610172ff7815',1,'CamController']]],
+  ['direction_5',['Direction',['../struct_cam_controller_1_1_direction.html',1,'CamController']]],
+  ['direction_6',['direction',['../struct_motor_command.html#a874e5bc77c8a69b3b64e3d085250c547',1,'MotorCommand']]],
+  ['direction_20convention_7',['Direction Convention',['../index.html#mapping_sub',1,'Direction Convention'],['../_motor_controller_8h.html#autotoc_md41',1,'Direction Convention'],['../_brain_8h.html#autotoc_md3',1,'Motor Direction Convention']]],
+  ['distance_8',['distance',['../struct_tracking_snapshot.html#af20ca2d6b43d9eaa86c91c70a259f6e9',1,'TrackingSnapshot::distance'],['../struct_cam_controller_1_1_direction.html#ad545040c4202992e18e8634d705162af',1,'CamController::Direction::distance'],['../struct_tracking_state.html#adc02e7065522017a7181bba0ccfedbc2',1,'TrackingState::distance']]],
+  ['downsample_20strategy_9',['ICP Downsample Strategy',['../_map_controller_8cpp.html#autotoc_md27',1,'']]],
+  ['drawvisualization_10',['drawVisualization',['../class_cam_controller.html#a0fb922e73df424b0956f82458aaf5277',1,'CamController']]],
+  ['drive_11',['drive',['../struct_motor_bus.html#aca48c94770fbe5b63d7c4bfbd9fe813f',1,'MotorBus::drive()'],['../class_motor_controller.html#a046adc1f48e07ac91b913a38e5e6e133',1,'MotorController::drive()']]],
+  ['driveoverstart_5f_12',['driveOverStart_',['../class_brain.html#a2abc89a4f68fd93cbfcec9e84fc6b7e8',1,'Brain']]],
+  ['driveovertick_13',['driveOverTick',['../class_brain.html#a8bd1d89b7c0f6de139e1b6be119ddc40',1,'Brain']]],
+  ['drv_14',['drv',['../_lidar_controller_8cpp.html#ab6813eca60672080e618af40c4e68bb3',1,'LidarController.cpp']]]
 ];

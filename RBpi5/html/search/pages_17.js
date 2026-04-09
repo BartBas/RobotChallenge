@@ -1,4 +1,4 @@
 var searchData=
 [
-  ['—_20scan_20to_20scan_20icp_0',['Odometry — Scan-to-Scan ICP',['../_map_controller_8h.html#autotoc_md32',1,'']]]
+  ['zone_20guide_20lines_0',['Collection Zone Guide Lines',['../_cam_controller_8h.html#autotoc_md10',1,'']]]
 ];

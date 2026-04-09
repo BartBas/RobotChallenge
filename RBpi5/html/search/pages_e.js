@@ -1,10 +1,8 @@
 var searchData=
 [
-  ['machine_20overview_0',['State Machine Overview',['../_brain_8h.html#autotoc_md0',1,'']]],
-  ['management_1',['Memory Management',['../_map_controller_8h.html#autotoc_md34',1,'']]],
-  ['mapping_2',['Perception &amp;amp; Mapping',['../index.html#perception_sub',1,'']]],
-  ['mapping_20inside_20the_2024_20bit_20payload_3',['Bit-Level Mapping (Inside the 24-bit payload)',['../index.html#bit_mapping',1,'']]],
-  ['memory_20management_4',['Memory Management',['../_map_controller_8h.html#autotoc_md34',1,'']]],
-  ['mjpeg_20streaming_5',['MJPEG Streaming',['../_cam_controller_8h.html#autotoc_md11',1,'']]],
-  ['motor_20direction_20convention_6',['Motor Direction Convention',['../_brain_8h.html#autotoc_md3',1,'']]]
+  ['level_20brain_20logic_0',['High-Level Brain Logic',['../index.html#brain_logic_sec',1,'']]],
+  ['level_20mapping_20inside_20the_2024_20bit_20payload_1',['Bit-Level Mapping (Inside the 24-bit payload)',['../index.html#bit_mapping',1,'']]],
+  ['lidar_20scan_2',['Update Cycle (called once per lidar scan)',['../_map_controller_8h.html#autotoc_md31',1,'']]],
+  ['lines_3',['Collection Zone Guide Lines',['../_cam_controller_8h.html#autotoc_md10',1,'']]],
+  ['logic_4',['High-Level Brain Logic',['../index.html#brain_logic_sec',1,'']]]
 ];

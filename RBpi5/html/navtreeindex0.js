@@ -208,6 +208,7 @@ var NAVTREEINDEX0 =
 "index.html#step1":[0,4,0],
 "index.html#step2":[0,4,1],
 "index.html#step3":[0,4,2],
+"index.html#step4":[0,4,3],
 "main_8cpp.html":[2,0,0,7],
 "main_8cpp.html#a351bcac08f729187e95f3c52c3a0a451":[2,0,0,7,14],
 "main_8cpp.html#a45c61e95b19894e42657d5a940d6571f":[2,0,0,7,15],
@@ -248,6 +249,5 @@ var NAVTREEINDEX0 =
 "struct_cam_controller_1_1_direction.html#ad545040c4202992e18e8634d705162af":[1,0,3,2,2],
 "struct_cam_controller_1_1_direction.html#adea021cd5ab3b59a1aa97e828d92f025":[1,0,3,2,1],
 "struct_cam_controller_1_1_direction.html#ae267141cb1fe72922f789d7bf4c26045":[1,0,3,2,3],
-"struct_cam_controller_1_1_red_object.html":[1,0,3,1],
-"struct_cam_controller_1_1_red_object.html#a662ea255974e40f676b716881acd7d49":[1,0,3,1,3]
+"struct_cam_controller_1_1_red_object.html":[1,0,3,1]
 };

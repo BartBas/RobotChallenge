@@ -52,7 +52,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "_brain_8h.html",
-"struct_cam_controller_1_1_red_object.html#a89fcc0d4ca18426bfa48c5884de19be0"
+"struct_cam_controller_1_1_red_object.html#a662ea255974e40f676b716881acd7d49"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';

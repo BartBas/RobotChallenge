@@ -16,6 +16,7 @@ var index =
     [ "Installation", "index.html#install_sec", [
       [ "Step 1: Environment Setup", "index.html#step1", null ],
       [ "Step 2: Compilation", "index.html#step2", null ],
-      [ "Step 3: Execution", "index.html#step3", null ]
+      [ "Step 3: Execution", "index.html#step3", null ],
+      [ "Step 4: Control", "index.html#step4", null ]
     ] ]
 ];

@@ -1,10 +1,7 @@
 var searchData=
 [
-  ['icp_0',['Odometry — Scan-to-Scan ICP',['../_map_controller_8h.html#autotoc_md32',1,'']]],
-  ['icp_20downsample_20strategy_1',['ICP Downsample Strategy',['../_map_controller_8cpp.html#autotoc_md27',1,'']]],
-  ['initialisation_2',['Serial Initialisation',['../_motor_controller_8cpp.html#autotoc_md37',1,'']]],
-  ['initialisation_20sequence_3',['Initialisation Sequence',['../_lidar_controller_8cpp.html#autotoc_md20',1,'']]],
-  ['inside_20the_2024_20bit_20payload_4',['Bit-Level Mapping (Inside the 24-bit payload)',['../index.html#bit_mapping',1,'']]],
-  ['installation_5',['Installation',['../index.html#install_sec',1,'']]],
-  ['introduction_6',['Introduction',['../index.html#intro_sec',1,'']]]
+  ['handling_0',['Error Handling',['../_config_8cpp.html#autotoc_md15',1,'']]],
+  ['hardware_20stack_1',['Hardware Stack',['../index.html#hardware_sec',1,'']]],
+  ['high_20level_20brain_20logic_2',['High-Level Brain Logic',['../index.html#brain_logic_sec',1,'']]],
+  ['highest_20first_3',['Priority Order (highest first)',['../_brain_8h.html#autotoc_md2',1,'']]]
 ];
