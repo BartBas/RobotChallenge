@@ -6,7 +6,7 @@
 
 # ── Hardware ──────────────────────────────────
 lidar_port      = /dev/ttyUSB0
-motor_port      = /dev/ttyACM0
+motor_port      = /dev/ttyUSB1
 flip_lidar      = true
 flip_camera     = true
 
@@ -14,8 +14,11 @@ flip_camera     = true
 # Ranges of angles (degrees) to ignore because
 # the lidar can see its own wheels/chassis.
 # Format: lidar_exclude = angle_min angle_max
-#lidar_exclude   = 80 100
-#lidar_exclude   = 260 280
+lidar_exclude = 6 13
+lidar_exclude = 35 68
+lidar_exclude = 110 140
+lidar_exclude = 210 250
+lidar_exclude = 290 330
 
 # ── Camera ────────────────────────────────────
 cam_width       = 2560
@@ -26,11 +29,27 @@ stream_port     = 8081
 # ── Colour tracking ───────────────────────────
 # Format:
 #   color = name  lHueMin lHueMax lSatMin lValMin  uHueMin uHueMax uSatMin uValMin
-color           = red     0   10  100  100   170  180  100  100
-
+color = red  0 10 150 139   170 180 150 139
 # ── Vision tuning ────────────────────────────
 min_area        = 200.0
 dead_on_thresh  = 5.0
+
+# ── Vision — elevated-object filter ──────────────────────────────
+# The camera is only 7 cm off the ground, so real cups always appear
+# in the lower portion of the frame.  These two settings reject large
+# colour blobs that sit too high (e.g. a red chair back).
+#
+# cam_elevated_area_thresh : contour area (px²) above which the Y check
+#                            is applied.  Small blobs (distant cups near
+#                            the horizon) are never rejected.
+cam_elevated_area_thresh = 3000
+#
+# cam_elevated_y_thresh    : normalised Y (0=top, 1=bottom).  A blob is
+#                            rejected if its centre is ABOVE this line AND
+#                            its area exceeds the threshold above.
+#                            0.40 = top 40 % of frame.
+cam_elevated_y_thresh    = 0.40
+ 
 
 # ── Web dashboard ────────────────────────────
 web_port        = 8080
@@ -42,7 +61,7 @@ brain_clear_dist  = 0.6
 brain_chase_speed = 45
 brain_seek_speed  = 30
 brain_avoid_speed = 35
-brain_front_arc   = 40.0
+brain_front_arc   = 30
 
 
 # ── Cup collection ────────────────────────────
@@ -50,8 +69,8 @@ brain_front_arc   = 40.0
 #                        Increase if it triggers too early; decrease if it
 #                        never triggers.  A rough guide: measure the contour
 #                        area when the cup is ~20 cm in front of the robot.
-brain_collect_dist   = 8000
-brain_drive_over_ms  = 1500
+brain_collect_dist   = 15000
+brain_drive_over_ms  = 3000
 
 
 # brain_collect_x_min/max : the horizontal "collection window" expressed as a
@@ -60,8 +79,8 @@ brain_drive_over_ms  = 1500
 #   right-of-centre.  Two purple guide lines are drawn on the live stream at
 #   these positions so you can tune visually.
 #   Default: 80 % – 100 %
-brain_collect_x_min  = 0.80
-brain_collect_x_max  = 1
+brain_collect_x_min  = 0.6
+brain_collect_x_max  = 0.8
 
 # brain_sidestep_speed : motor speed (0-100) while side-stepping left to align
 brain_sidestep_speed = 25

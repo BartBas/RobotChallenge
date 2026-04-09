@@ -71,6 +71,9 @@ bool loadConfig(const std::string& path, RobotConfig& cfg)
         else if (key == "brain_sidestep_speed")    cfg.brainSidestepSpeed  = std::stoi(val);
         else if (key == "brain_drive_speed")       cfg.brainDriveSpeed     = std::stoi(val);
         else if (key == "brain_drive_over_ms")     cfg.brainDriveOverMs    = std::stoi(val);
+        // Elevated-object filter
+        else if (key == "cam_elevated_area_thresh") cfg.camElevatedAreaThresh = std::stod(val);
+        else if (key == "cam_elevated_y_thresh")    cfg.camElevatedYThresh    = std::stof(val);
 
         else if (key == "lidar_exclude") {
             std::istringstream ss(val);

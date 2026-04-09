@@ -190,6 +190,33 @@ std::vector<CamController::RedObject> CamController::findColorObjects()
             : cv::Point2f(obj.boundingBox.x + obj.boundingBox.width  * 0.5f,
                           obj.boundingBox.y + obj.boundingBox.height * 0.5f);
 
+        // ── Elevated-object filter ────────────────────────────────────────
+        // The camera sits only 7 cm off the ground, so real cups always appear
+        // in the lower portion of the frame regardless of distance.  A large
+        // object whose centre is in the top 40 % of the frame (normalised Y
+        // < 0.40) is almost certainly elevated furniture (chair back, table
+        // leg, etc.) — reject it.
+        //
+        // The threshold scales with area: small blobs in the upper frame are
+        // tolerated (might be a distant cup near the horizon), but anything
+        // large AND high is rejected outright.
+        //
+        //   norm_y = 0   → top of frame   (suspicious if large)
+        //   norm_y = 1   → bottom of frame (always fine)
+        //
+        // Rejection condition:
+        //   area > elevatedAreaThresh  AND  normY < elevatedYThresh
+        {
+            float normY = (frameHeight > 0)
+                          ? (obj.center.y / (float)frameHeight)
+                          : 1.0f;
+
+            if (area > elevatedAreaThresh_ && normY < elevatedYThresh_) {
+                // Silently skip — large blob sitting high in frame
+                continue;
+            }
+        }
+
         // Identify colour: check HSV pixel at centroid against each range
         obj.colorName = "unknown";
         if (!hsvFrame_.empty()) {

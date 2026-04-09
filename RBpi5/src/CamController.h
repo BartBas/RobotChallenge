@@ -92,6 +92,12 @@ public:
     bool isStreamingEnabled() const;
     int getStreamPort() const;
 
+    // Elevated-object filter (rejects large blobs high in frame)
+    void setElevatedFilter(double areaThresh, float yThresh) {
+        elevatedAreaThresh_ = areaThresh;
+        elevatedYThresh_    = yThresh;
+    }
+
 private:
     cv::VideoCapture cap;
     cv::Mat currentFrame;
@@ -119,6 +125,11 @@ private:
     // Collection zone line positions (normalised 0..1)
     float collectXMin_ = 0.55f;
     float collectXMax_ = 0.75f;
+
+    // Elevated-object filter — rejects large blobs sitting high in the frame
+    // (e.g. chair backs).  Defaults match the values in Config.h.
+    double elevatedAreaThresh_ = 3000.0;  // px²: only applied when area exceeds this
+    float  elevatedYThresh_    = 0.40f;   // normalised Y: blobs above this line are suspect
 
     // Pre-allocated working Mats — reused every frame to avoid heap churn
     cv::Mat hsvFrame_;       // BGR->HSV conversion target

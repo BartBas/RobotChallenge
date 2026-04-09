@@ -59,7 +59,7 @@ bool MotorController::sendPacket(bool cmd_enable, int direction,
         std::cerr << "[MotorController] Port not open" << std::endl;
         return false;
     }
-
+	
     uint32_t packet = 0;
     if (cmd_enable)          packet |= (1u << 19);
     packet |= ((uint32_t)(direction & 0x1FF)) << 10;
@@ -67,7 +67,8 @@ bool MotorController::sendPacket(bool cmd_enable, int direction,
     packet |= ((uint32_t)(speed      & 0x7F)) << 1;
     if (pickup)              packet |= 0x01u;
 
-    uint8_t bytes[3] = {
+    uint8_t bytes[4] = {
+    	0xFF,
         (uint8_t)((packet >> 16) & 0xFF),
         (uint8_t)((packet >>  8) & 0xFF),
         (uint8_t)( packet        & 0xFF)
@@ -85,9 +86,10 @@ bool MotorController::sendPacket(bool cmd_enable, int direction,
               << std::setw(2) << std::setfill('0') << (int)bytes[0]
               << std::setw(2) << std::setfill('0') << (int)bytes[1]
               << std::setw(2) << std::setfill('0') << (int)bytes[2]
+              << std::setw(2) << std::setfill('0') << (int)bytes[3]
               << std::dec << std::endl;
-
-    bool ok = write(serial_port, bytes, 3) == 3;
+	tcflush(serial_port, TCIOFLUSH);
+    bool ok = write(serial_port, bytes, 4) == 4;
     if (!ok) std::cerr << "[MotorController] write() failed: " << strerror(errno) << std::endl;
     return ok;
 }

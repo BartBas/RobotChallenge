@@ -72,7 +72,7 @@ struct MotorCommand {
     int    direction  = 360;  // compass degrees 1-360  (360 = straight forward)
     int    turn       = 0;    // 0=none  1=left  2=right
     int    speed      = 0;    // 0-100 %
-    bool   pickup     = false;
+    bool   pickup     = true;
 };
 #endif
 
@@ -161,12 +161,12 @@ public:
             // the frontClosest check.
             out = driveOverTick();
 
-        } else if (frontClosest < cfg_.brainClearDist) {
+        } else if (frontClosest < cfg_.brainClearDist && false) {
             // ── AVOID ─────────────────────────────────────────────────────
             out.mode          = "AVOID";
             out.reason        = "obstacle at " + std::to_string((int)(frontClosest * 100)) + " cm";
             out.cmd.speed     = cfg_.brainAvoidSpeed;
-            out.cmd.direction = 360;
+            out.cmd.direction = 180;
             out.cmd.turn      = (worstAngle > 0) ? 2 : 1;   // 2=right  1=left
 
         } else if (tracking.objectCount > 0 &&
@@ -243,7 +243,7 @@ private:
             out.cmd.speed     = cfg_.brainSidestepSpeed;
             out.cmd.direction = 270;   // pure left strafe
             out.cmd.turn      = 0;
-            out.cmd.pickup    = false;
+            out.cmd.pickup    = true;
         } else {
             // Cup is aligned — start the timed blind drive
             collectingPhaseB_ = true;
@@ -274,7 +274,7 @@ private:
                             std::to_string(elapsed) + " / " +
                             std::to_string(cfg_.brainDriveOverMs) + " ms";
             out.cmd.speed     = cfg_.brainDriveSpeed;
-            out.cmd.direction = 360;   // straight forward
+            out.cmd.direction = 359;   // straight forward
             out.cmd.turn      = 0;
             out.cmd.pickup    = true;  // keep pickup servo running throughout
         } else {
@@ -283,7 +283,7 @@ private:
             out.mode      = "COLLECT";
             out.reason    = "drive-over complete — resuming search";
             out.cmd.speed     = 0;
-            out.cmd.direction = 360;
+            out.cmd.direction = 359;
             out.cmd.turn      = 0;
             out.cmd.pickup    = false;
         }
