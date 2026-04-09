@@ -19,7 +19,7 @@ const float MAX_RPM_LIMIT = 80.0;
 
 // Servo Settings
 const int SERVO_STOP = 80;
-const int SERVO_RUN = 70;
+const int SERVO_RUN = 65;
 
 // Sync byte for binary protocol
 const uint8_t SYNC_BYTE = 0xFF;
