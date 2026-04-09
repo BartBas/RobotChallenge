@@ -1,0 +1,26 @@
+var searchData=
+[
+  ['camelevatedareathresh_0',['camElevatedAreaThresh',['../struct_robot_config.html#a610774b38ecf8d30d72d88473b48b041',1,'RobotConfig']]],
+  ['camelevatedythresh_1',['camElevatedYThresh',['../struct_robot_config.html#a410cd1f1d49eed0c180e9521a2191180',1,'RobotConfig']]],
+  ['cameraindex_2',['cameraIndex',['../class_cam_controller.html#a293b48d124f15eef0bd3eecec1571ebb',1,'CamController']]],
+  ['camerastream_3',['cameraStream',['../class_cam_controller.html#acea683c4f47819ea99cad6511e27eabf',1,'CamController']]],
+  ['camfps_4',['camFps',['../struct_robot_config.html#a204dd1c24e367d4aff6e32c656142951',1,'RobotConfig']]],
+  ['camheight_5',['camHeight',['../struct_robot_config.html#a67fc2792eb0f8bc93e9794e484247951',1,'RobotConfig']]],
+  ['camwidth_6',['camWidth',['../struct_robot_config.html#a0e3d29eefa1b9952f8e308377d35419c',1,'RobotConfig']]],
+  ['cap_7',['cap',['../class_cam_controller.html#a452cb6cc6d96638070547df15055de05',1,'CamController']]],
+  ['cells_8',['cells',['../struct_occ_grid.html#a3d110a344f956e0e92c7c4da38df4242',1,'OccGrid']]],
+  ['center_9',['center',['../struct_cam_controller_1_1_red_object.html#ac1e4b548bea1872e5f7e157d90ddb763',1,'CamController::RedObject']]],
+  ['cfg_10',['CFG',['../main_8cpp.html#aff3d9e0c0f55d89639cd755d8c073ec1',1,'main.cpp']]],
+  ['cfg_5f_11',['cfg_',['../class_brain.html#a41f226029cb6867a02f1a30470e51fb9',1,'Brain']]],
+  ['cloud_5f_12',['cloud_',['../class_map_controller.html#aa7a14c3d2a0e1453b3e9fc677e994f13',1,'MapController']]],
+  ['cmd_13',['cmd',['../struct_brain_output.html#a4817a17d263a74b66004cd42e4c39771',1,'BrainOutput']]],
+  ['cmd_5fenable_14',['cmd_enable',['../struct_motor_command.html#a04c72ae01d7988aa0b5be1a1b24c9107',1,'MotorCommand']]],
+  ['collectingphaseb_5f_15',['collectingPhaseB_',['../class_brain.html#ae90e41ffe646432c02cd8eb870eaf3c6',1,'Brain']]],
+  ['collectxmax_5f_16',['collectXMax_',['../class_cam_controller.html#acc2ab412f9db43ba6bbf337e2c49e558',1,'CamController']]],
+  ['collectxmin_5f_17',['collectXMin_',['../class_cam_controller.html#a3c5a8d3bcfc2af390f77e226ea162c30',1,'CamController']]],
+  ['colorname_18',['colorName',['../struct_cam_controller_1_1_red_object.html#a662ea255974e40f676b716881acd7d49',1,'CamController::RedObject']]],
+  ['colors_19',['colors',['../struct_robot_config.html#a9df591180090030eb7c658a12b9e7994',1,'RobotConfig']]],
+  ['combinedmask_5f_20',['combinedMask_',['../class_cam_controller.html#a3a3c2304a46967eb828fd2c0730c78fa',1,'CamController']]],
+  ['command_21',['command',['../struct_tracking_snapshot.html#ae0ee815169218e5904048067ce76bca4',1,'TrackingSnapshot::command'],['../struct_cam_controller_1_1_direction.html#adea021cd5ab3b59a1aa97e828d92f025',1,'CamController::Direction::command'],['../struct_tracking_state.html#a21c4a49320e7043585b3b5946ef7f159',1,'TrackingState::command']]],
+  ['currentframe_22',['currentFrame',['../class_cam_controller.html#adaee37fa7efd48a06241fda8e0dce935',1,'CamController']]]
+];
