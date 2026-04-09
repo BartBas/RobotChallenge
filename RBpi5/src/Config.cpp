@@ -1,17 +1,39 @@
+/**
+ * @file Config.cpp
+ * @brief Implementation of the robot config-file loader.
+ *
+ * @details
+ * Reads a plain-text `key = value` file and populates a `RobotConfig` struct.
+ * Any key not recognised is reported on stderr; all other keys fall back to
+ * the defaults declared in `Config.h`.
+ *
+ * ### Parsing Rules
+ * - Whitespace around keys and values is stripped before matching.
+ * - Everything from `#` to end-of-line is treated as a comment.
+ * - Boolean values accept `true`, `1`, or `yes` (case-insensitive) as true;
+ *   anything else is false.
+ * - `color` and `lidar_exclude` are repeatable; each occurrence appends one
+ *   entry to the corresponding vector in `RobotConfig`.
+ *
+ * ### Error Handling
+ * - If the file cannot be opened, the function logs a warning and returns
+ *   `false`; `cfg` is left at its default-constructed state.
+ * - Malformed `color` or `lidar_exclude` lines are skipped with a warning.
+ * - Lines missing an `=` separator are skipped with a warning.
+ */
+
 #include "Config.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
 #include <algorithm>
 
-// Trim whitespace from both ends
 static std::string trim(const std::string& s) {
     size_t a = s.find_first_not_of(" \t\r\n");
     size_t b = s.find_last_not_of(" \t\r\n");
     return (a == std::string::npos) ? "" : s.substr(a, b - a + 1);
 }
 
-// Case-insensitive "true"/"1"/"yes" → true
 static bool parseBool(const std::string& v) {
     std::string l = v;
     std::transform(l.begin(), l.end(), l.begin(), ::tolower);
@@ -57,21 +79,19 @@ bool loadConfig(const std::string& path, RobotConfig& cfg)
         else if (key == "min_area")                cfg.minArea             = std::stod(val);
         else if (key == "dead_on_thresh")          cfg.deadOnThresh        = std::stod(val);
         else if (key == "web_port")                cfg.webPort             = std::stoi(val);
-        else if (key == "ws_port") 				   cfg.wsPort 			   = std::stoi(val);
+        else if (key == "ws_port")                 cfg.wsPort              = std::stoi(val);
         else if (key == "brain_hz")                cfg.brainHz             = std::stoi(val);
         else if (key == "brain_clear_dist")        cfg.brainClearDist      = std::stof(val);
         else if (key == "brain_chase_speed")       cfg.brainChaseSpeed     = std::stoi(val);
         else if (key == "brain_seek_speed")        cfg.brainSeekSpeed      = std::stoi(val);
         else if (key == "brain_avoid_speed")       cfg.brainAvoidSpeed     = std::stoi(val);
         else if (key == "brain_front_arc")         cfg.brainFrontArc       = std::stof(val);
-        // Cup collection
         else if (key == "brain_collect_dist")      cfg.brainCollectDist    = std::stod(val);
         else if (key == "brain_collect_x_min")     cfg.brainCollectXMin    = std::stof(val);
         else if (key == "brain_collect_x_max")     cfg.brainCollectXMax    = std::stof(val);
         else if (key == "brain_sidestep_speed")    cfg.brainSidestepSpeed  = std::stoi(val);
         else if (key == "brain_drive_speed")       cfg.brainDriveSpeed     = std::stoi(val);
         else if (key == "brain_drive_over_ms")     cfg.brainDriveOverMs    = std::stoi(val);
-        // Elevated-object filter
         else if (key == "cam_elevated_area_thresh") cfg.camElevatedAreaThresh = std::stod(val);
         else if (key == "cam_elevated_y_thresh")    cfg.camElevatedYThresh    = std::stof(val);
 

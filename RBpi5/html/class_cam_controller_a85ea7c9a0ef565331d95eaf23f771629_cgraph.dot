@@ -1,0 +1,13 @@
+digraph "CamController::captureFrame"
+{
+ // LATEX_PDF_SIZE
+  bgcolor="transparent";
+  edge [fontname=Helvetica,fontsize=10,labelfontname=Helvetica,labelfontsize=10];
+  node [fontname=Helvetica,fontsize=10,shape=box,height=0.2,width=0.4];
+  rankdir="LR";
+  Node1 [id="Node000001",label="CamController::captureFrame",height=0.2,width=0.4,color="gray40", fillcolor="grey60", style="filled", fontcolor="black",tooltip="Captures one frame from the camera and runs the full detection pipeline on it."];
+  Node1 -> Node2 [id="edge1_Node000001_Node000002",color="steelblue1",style="solid",tooltip=" "];
+  Node2 [id="Node000002",label="CamController::detectColor\lPixels",height=0.2,width=0.4,color="grey40", fillcolor="white", style="filled",URL="$class_cam_controller.html#a13561ab26d2202517202a11a62fb2ac7",tooltip="Converts the current BGR frame to HSV and builds a combined colour mask for all registered colours."];
+  Node1 -> Node3 [id="edge2_Node000001_Node000003",color="steelblue1",style="solid",tooltip=" "];
+  Node3 [id="Node000003",label="CamController::findColor\lObjects",height=0.2,width=0.4,color="grey40", fillcolor="white", style="filled",URL="$class_cam_controller.html#af2a56029672bd325da6bd876a7119bd2",tooltip="Finds and filters colour blobs in the current combined mask."];
+}

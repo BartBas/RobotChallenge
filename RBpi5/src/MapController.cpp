@@ -1,3 +1,37 @@
+/**
+ * @file MapController.cpp
+ * @brief Implementation of ICP odometry, occupancy grid mapping, and
+ *        point-cloud management.
+ *
+ * @details
+ * All heavy computation lives here. Key implementation notes:
+ *
+ * ### ICP Downsample Strategy
+ * Both the current and previous scans are uniformly strided to at most 200
+ * points before the nearest-neighbour search. This keeps the O(n²) brute-force
+ * correspondence search within ~40 000 distance evaluations per iteration —
+ * fast enough for 10 Hz operation on a Raspberry Pi 5.
+ *
+ * ### Voxel Filter
+ * `voxelFilterCloud()` uses a flat `unordered_map` keyed on a 64-bit integer
+ * packing the (ix, iy) voxel indices. The last point written to each cell
+ * wins. At a 10 cm voxel size this caps the cloud at roughly 40 000 points
+ * for a 20 × 20 m arena, keeping serialisation to the web dashboard fast.
+ *
+ * ### Bresenham Raycasting
+ * `raycastIntoGrid()` walks from the robot cell to each hit cell using
+ * integer Bresenham arithmetic. Every cell along the ray (except the
+ * endpoint) is marked FREE (1); the endpoint is marked OCCUPIED (2).
+ * Existing OCCUPIED cells are not overwritten by FREE rays — a cell can
+ * only transition unknown → free or unknown/free → occupied.
+ *
+ * ### Grid Growth
+ * `ensureGridCovers()` pads the grid by 5 m whenever a world point
+ * approaches the current boundary. Growth clears the cell array to zero
+ * (unknown), so the occupancy history is not retained across expansions.
+ * The hard cap of ±20 m prevents unbounded memory use if ICP drifts.
+ */
+
 #include "MapController.h"
 #include <cmath>
 #include <algorithm>
@@ -5,7 +39,6 @@
 #include <limits>
 #include <unordered_map>
 
-// ─── constructor ────────────────────────────────────────────────────
 MapController::MapController(double res_m, double max_range, size_t max_path)
     : maxRange_(max_range)
     , maxPath_(max_path)
@@ -19,7 +52,6 @@ MapController::MapController(double res_m, double max_range, size_t max_path)
     grid_.cells.assign(grid_.width * grid_.height, 0);
 }
 
-// ─── reset ──────────────────────────────────────────────────────────
 void MapController::reset()
 {
     std::lock_guard<std::mutex> lk(mutex_);
@@ -31,15 +63,13 @@ void MapController::reset()
     grid_.cells.assign(grid_.width * grid_.height, 0);
 }
 
-// ─── update ─────────────────────────────────────────────────────────
 void MapController::update(const std::vector<LidarPoint>& scan)
 {
     if (scan.empty()) return;
 
     auto pts = toEigen2D(scan);
-    if (pts.size() < 100) return;   // still spinning up
+    if (pts.size() < 100) return;
 
-    // On the first frame we have nothing to match against — just store and wait
     if (!hasPrev_) {
         std::lock_guard<std::mutex> lk(mutex_);
         prevScan_ = pts;
@@ -48,32 +78,26 @@ void MapController::update(const std::vector<LidarPoint>& scan)
         return;
     }
 
-    // ── Scan-to-scan ICP ──────────────────────────────────────────
     double dx = 0, dy = 0, dYaw = 0;
     bool ok = icp2D(pts, prevScan_, dx, dy, dYaw);
 
     std::lock_guard<std::mutex> lk(mutex_);
 
     if (ok) {
-        // Compose relative transform with accumulated pose
         double c = std::cos(pose_.yaw);
         double s = std::sin(pose_.yaw);
         pose_.x   += c * dx - s * dy;
         pose_.y   += s * dx + c * dy;
         pose_.yaw += dYaw;
-        // Keep yaw in [-π, π]
         while (pose_.yaw >  M_PI) pose_.yaw -= 2.0 * M_PI;
         while (pose_.yaw < -M_PI) pose_.yaw += 2.0 * M_PI;
     }
 
-    // Always update previous scan (even on ICP failure, so we don't get stuck)
     prevScan_ = pts;
 
-    // ── Trail ─────────────────────────────────────────────────────
     path_.push_back(pose_);
     if (path_.size() > maxPath_) path_.pop_front();
 
-    // ── Accumulate world-frame cloud ──────────────────────────────
     double c = std::cos(pose_.yaw);
     double s = std::sin(pose_.yaw);
     for (const auto& p : pts) {
@@ -82,38 +106,28 @@ void MapController::update(const std::vector<LidarPoint>& scan)
         cloud_.emplace_back(wx, wy, 0.0);
     }
 
-    // Voxel-filter every 20 updates (~2 s at 10 Hz) to keep memory flat.
-    // This merges nearby points into one per cell — map fidelity is preserved
-    // because the occupancy grid holds the real obstacle data.
     static int cloudUpdateCount = 0;
     if (++cloudUpdateCount >= 20) {
         cloudUpdateCount = 0;
         voxelFilterCloud();
     }
 
-    // ── Occupancy grid ────────────────────────────────────────────
     raycastIntoGrid(pose_, pts);
 }
 
-// ─── voxelFilterCloud ───────────────────────────────────────────────
-// Merges all cloud_ points that fall in the same 10 cm voxel cell into
-// a single representative point.  Keeps memory bounded without losing
-// structural map detail (the occupancy grid has the real data anyway).
 void MapController::voxelFilterCloud()
 {
-    const double voxel = 0.10;  // 10 cm — tune larger to save more RAM
+    const double voxel = 0.10;
 
     std::unordered_map<uint64_t, Eigen::Vector3d> cells;
     cells.reserve(cloud_.size());
 
     for (const auto& p : cloud_) {
-        // Map world coords to integer voxel indices
         int64_t ix = static_cast<int64_t>(std::floor(p.x() / voxel));
         int64_t iy = static_cast<int64_t>(std::floor(p.y() / voxel));
-        // Pack into a single 64-bit key (32 bits each, offset to handle negatives)
         uint64_t key = ((uint64_t)((ix + 0x7FFFFFFF) & 0xFFFFFFFF) << 32) |
                         (uint64_t)((iy + 0x7FFFFFFF) & 0xFFFFFFFF);
-        cells[key] = p;  // last point in each cell wins
+        cells[key] = p;
     }
 
     cloud_.clear();
@@ -124,7 +138,6 @@ void MapController::voxelFilterCloud()
     std::cout << "[MapController] Cloud voxel-filtered → " << cloud_.size() << " points\n";
 }
 
-// ─── accessors ──────────────────────────────────────────────────────
 Pose2D MapController::getPose() const {
     std::lock_guard<std::mutex> lk(mutex_);
     return pose_;
@@ -142,7 +155,6 @@ OccGrid MapController::getGrid() const {
     return grid_;
 }
 
-// ─── toEigen2D ───────────────────────────────────────────────────────
 std::vector<Eigen::Vector2d>
 MapController::toEigen2D(const std::vector<LidarPoint>& scan) const
 {
@@ -160,7 +172,6 @@ MapController::toEigen2D(const std::vector<LidarPoint>& scan) const
     return out;
 }
 
-// ─── transform2D ────────────────────────────────────────────────────
 std::vector<Eigen::Vector2d>
 MapController::transform2D(const std::vector<Eigen::Vector2d>& pts,
                             double tx, double ty, double yaw)
@@ -174,10 +185,6 @@ MapController::transform2D(const std::vector<Eigen::Vector2d>& pts,
     return out;
 }
 
-// ─── icp2D ───────────────────────────────────────────────────────────
-// Point-to-point 2D ICP using SVD.
-// src = current scan, ref = previous scan (both in robot-local frame).
-// Outputs the relative transform (dx, dy, dYaw) that aligns src → ref.
 bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
                            const std::vector<Eigen::Vector2d>& ref,
                            double& outDx, double& outDy, double& outDYaw,
@@ -185,7 +192,6 @@ bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
 {
     if (src.size() < 20 || ref.size() < 20) return false;
 
-    // Downsample to at most 200 points each for speed on the Pi
     auto downsample = [](const std::vector<Eigen::Vector2d>& in, size_t maxPts)
         -> std::vector<Eigen::Vector2d>
     {
@@ -200,19 +206,16 @@ bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
     auto s = downsample(src, 200);
     auto r = downsample(ref, 200);
 
-    double tx = 0, ty = 0, yaw = 0;   // accumulated transform
+    double tx = 0, ty = 0, yaw = 0;
 
     for (int iter = 0; iter < maxIter; ++iter) {
-        // Apply current estimate to source points
         auto moved = transform2D(s, tx, ty, yaw);
 
-        // Find nearest neighbour in ref for each moved point
-        // (brute force — fast enough at 200 pts)
         std::vector<Eigen::Vector2d> srcPts, dstPts;
         srcPts.reserve(moved.size());
         dstPts.reserve(moved.size());
 
-        const double maxDistSq = 0.5 * 0.5;   // reject correspondences > 50 cm apart
+        const double maxDistSq = 0.5 * 0.5;
 
         for (const auto& mp : moved) {
             double bestDist = std::numeric_limits<double>::max();
@@ -227,9 +230,8 @@ bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
             }
         }
 
-        if (srcPts.size() < 10) return false;   // too few correspondences
+        if (srcPts.size() < 10) return false;
 
-        // Compute centroids
         Eigen::Vector2d srcMean = Eigen::Vector2d::Zero();
         Eigen::Vector2d dstMean = Eigen::Vector2d::Zero();
         for (size_t i = 0; i < srcPts.size(); ++i) {
@@ -239,16 +241,13 @@ bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
         srcMean /= (double)srcPts.size();
         dstMean /= (double)dstPts.size();
 
-        // Build 2×2 covariance matrix H
         Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
         for (size_t i = 0; i < srcPts.size(); ++i)
             H += (srcPts[i] - srcMean) * (dstPts[i] - dstMean).transpose();
 
-        // SVD → optimal rotation
         Eigen::JacobiSVD<Eigen::Matrix2d> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
         Eigen::Matrix2d R = svd.matrixV() * svd.matrixU().transpose();
 
-        // Ensure proper rotation (det = +1)
         if (R.determinant() < 0) {
             Eigen::Matrix2d V = svd.matrixV();
             V.col(1) *= -1;
@@ -258,20 +257,17 @@ bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
         double dAngle = std::atan2(R(1, 0), R(0, 0));
         Eigen::Vector2d dT = dstMean - R * srcMean;
 
-        // Accumulate
         double c = std::cos(yaw), s2 = std::sin(yaw);
         tx  += c * dT.x() - s2 * dT.y();
         ty  += s2 * dT.x() + c * dT.y();
         yaw += dAngle;
 
-        // Convergence check
         if (std::abs(dT.x()) < tolerance &&
             std::abs(dT.y()) < tolerance &&
             std::abs(dAngle) < tolerance)
             break;
     }
 
-    // Sanity check — reject implausible motion (> 1 m or > 45° per scan)
     if (std::abs(tx)  > 1.0 || std::abs(ty)  > 1.0 ||
         std::abs(yaw) > M_PI / 4.0) {
         std::cerr << "[MapController] ICP result rejected: too large ("
@@ -285,12 +281,8 @@ bool MapController::icp2D(const std::vector<Eigen::Vector2d>& src,
     return true;
 }
 
-// ─── ensureGridCovers ───────────────────────────────────────────────
 void MapController::ensureGridCovers(double wx, double wy)
 {
-    // Hard cap — refuse to grow beyond a 20×20 m arena.
-    // If the robot wanders further, lidar points outside this zone are simply
-    // not raycast into the grid (they're still used for ICP / odometry).
     const double MAX_EXTENT = 20.0;
     if (std::abs(wx) > MAX_EXTENT || std::abs(wy) > MAX_EXTENT) return;
 
@@ -313,7 +305,6 @@ void MapController::ensureGridCovers(double wx, double wy)
     }
 }
 
-// ─── worldToCell ────────────────────────────────────────────────────
 bool MapController::worldToCell(double wx, double wy, int& col, int& row) const
 {
     col = (int)((wx - grid_.originX) / grid_.res);
@@ -321,7 +312,6 @@ bool MapController::worldToCell(double wx, double wy, int& col, int& row) const
     return col >= 0 && col < grid_.width && row >= 0 && row < grid_.height;
 }
 
-// ─── raycastIntoGrid ────────────────────────────────────────────────
 void MapController::raycastIntoGrid(const Pose2D& pose,
                                      const std::vector<Eigen::Vector2d>& pts)
 {
@@ -341,7 +331,6 @@ void MapController::raycastIntoGrid(const Pose2D& pose,
         int ec, er;
         if (!worldToCell(wx, wy, ec, er)) continue;
 
-        // Bresenham ray from robot cell to hit cell
         int x0 = rc, y0 = rr, x1 = ec, y1 = er;
         int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0);
         int sx = (x0 < x1) ? 1 : -1, sy = (y0 < y1) ? 1 : -1;
@@ -351,12 +340,12 @@ void MapController::raycastIntoGrid(const Pose2D& pose,
             if (x0 == x1 && y0 == y1) {
                 int idx = y0 * grid_.width + x0;
                 if (idx >= 0 && idx < (int)grid_.cells.size())
-                    grid_.cells[idx] = 2;   // OCCUPIED
+                    grid_.cells[idx] = 2;
                 break;
             }
             int idx = y0 * grid_.width + x0;
             if (idx >= 0 && idx < (int)grid_.cells.size() && grid_.cells[idx] != 2)
-                grid_.cells[idx] = 1;       // FREE
+                grid_.cells[idx] = 1;
 
             int e2 = 2 * err;
             if (e2 > -dy) { err -= dy; x0 += sx; }

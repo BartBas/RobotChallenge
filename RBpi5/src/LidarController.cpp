@@ -1,3 +1,33 @@
+/**
+ * @file LidarController.cpp
+ * @brief Implementation of the YDLidar sensor wrapper.
+ *
+ * @details
+ * Uses the YDLidar SDK (`YDlidarDriver`) directly to connect, start, and
+ * retrieve scan data from the sensor over a serial port.
+ *
+ * ### Initialisation Sequence
+ * 1. Connect to the serial port at 128 000 baud.
+ * 2. Enable single-channel mode.
+ * 3. Start the scan motor.
+ * 4. Wait 2 seconds for the motor to reach stable speed before the first
+ *    scan is usable.
+ *
+ * ### Scan Retrieval (`getLatestScan`)
+ * Calls `grabScanData()` with a 500 ms timeout, then sorts points with
+ * `ascendScanData()`. Each raw point is:
+ * - Decoded from fixed-point SDK units (angle ÷ 128 → degrees,
+ *   distance ÷ 4000 → metres).
+ * - Dropped if distance is zero, non-finite, or outside the 0.12–10 m
+ *   working range.
+ * - Angle-flipped by 180° when `flipMounted` is true.
+ * - Dropped if the angle falls within any registered exclusion zone.
+ *
+ * ### Thread Safety
+ * `getLatestScan()` is not internally synchronised. If called from multiple
+ * threads, the caller must provide external locking.
+ */
+
 #include "LidarController.h"
 #include <iostream>
 #include <thread>

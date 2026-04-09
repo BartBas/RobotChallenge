@@ -1,3 +1,11 @@
+/**
+ * @file main.cpp
+ * @brief Main control software for the autonomously robot.
+ * * This file sets up the hardware controllers (Lidar, Camera, Motor), initializes
+ * the internal state map, spawns sensor and autonomous brain threads, and serves 
+ * a web-based dashboard using Crow for telemetry and manual remote control.
+ */
+
 #include "LidarController.h"
 #include "CamController.h"
 #include "MotorController.h"
@@ -15,69 +23,82 @@
 #include <cmath>
 #include <string>
 
-// ===== CONFIGURATION =====
+/// Global configuration loaded from config.txt
 RobotConfig CFG;
-// =========================
 
+/// Atomic flag to control the main execution loop and thread lifespans
 std::atomic<bool> running{true};
 
-// ══════════════════════════════════════════════════════════════════
-//  Shared sensor state
-// ══════════════════════════════════════════════════════════════════
+/// @name Shared Sensor State
+/// Mutex-protected global structures for sensor telemetry.
+///@{
 
+/// Latest full 360-degree Lidar scan
 std::vector<LidarPoint> global_scan;
+/// Mutex protecting global_scan
 std::mutex              scan_mutex;
-
+/**
+ * @brief Represents the current vision tracking state.
+ */
 struct TrackingState {
-    double      angle        = 0.0;
-    double      distance     = 0.0;
-    int         objectCount  = 0;
-    std::string command      = "NO TARGET";
-    int         actual_fps   = 0;
+    double      angle        = 0.0;         ///< Bearing angle to target
+    double      distance     = 0.0;         ///< Distance to target
+    int         objectCount  = 0;           ///< Number of detected objects
+    std::string command      = "NO TARGET"; ///< String representation of current tracking command
+    int         actual_fps   = 0;           ///< Measured camera processing frames per second
 
-    // Pixel-space fields for Brain COLLECT logic
-    double      targetPixelX = -1.0;   // centre-x of chosen target (-1 = none)
-    double      targetPixelY = -1.0;
-    double      targetArea   = 0.0;    // contour area in pixels²
-    int         frameWidth   = 640;
+    double      targetPixelX = -1.0;        ///< Centre-X of chosen target in pixel space (-1.0 if none)
+    double      targetPixelY = -1.0;        ///< Centre-Y of chosen target in pixel space (-1.0 if none)
+    double      targetArea   = 0.0;         ///< Contour area of the target in pixels squared
+    int         frameWidth   = 640;         ///< Width of the camera frame
 };
+
+/// Global instance of tracking state
 TrackingState global_tracking;
+/// Mutex protecting global_tracking
 std::mutex    tracking_mutex;
+///@}
 
-// ══════════════════════════════════════════════════════════════════
-//  Map state
-// ══════════════════════════════════════════════════════════════════
+/// @name Map State
+///@{
+/// Global SLAM map controller instance
 MapController global_map;
+/// Mutex protecting global_map
 std::mutex    map_mutex;
+///@}
 
-// ══════════════════════════════════════════════════════════════════
-//  MotorCommand
-// ══════════════════════════════════════════════════════════════════
 
 #ifndef MOTOR_COMMAND_DEFINED
 #define MOTOR_COMMAND_DEFINED
+/**
+ * @brief Encapsulates a movement command for the motor controller.
+ */
 struct MotorCommand {
-    bool   cmd_enable = true;
-    int    direction  = 90;
-    int    turn       = 0;
-    int    speed      = 0;
-    bool   pickup     = false;
+    bool   cmd_enable = false;  ///< True if motors are enabled, false triggers an emergency stop
+    int    direction  = 360;    ///< Movement direction in degrees (360 = forward)
+    int    turn       = 0;     ///< Turn modifier: 0=Straight, 1=Left, 2=Right
+    int    speed      = 0;     ///< Speed percentage (0-100)
+    bool   pickup     = false; ///< True to engage the pickup servo mechanism
 };
 #endif
 
-// ══════════════════════════════════════════════════════════════════
-//  MotorBus
-// ══════════════════════════════════════════════════════════════════
-
+/**
+ * @brief Thread-safe bus for sending commands to the hardware motor controller.
+ */
 struct MotorBus {
-    MotorController*        hw      = nullptr;
-    mutable std::mutex      mtx;
+    MotorController* hw      = nullptr; ///< Pointer to the active hardware controller
+    mutable std::mutex      mtx;               ///< Mutex protecting bus state
 
-    MotorCommand            last_cmd;
-    bool                    estopped = false;
-    std::string             source   = "manual";
-    uint64_t                seq      = 0;   // incremented on every drive() call
+    MotorCommand            last_cmd;          ///< The most recently issued command
+    bool                    estopped = false;  ///< True if the system is currently in E-Stop
+    std::string             source   = "manual";///< Source identifier of the last command
+    uint64_t                seq      = 0;      ///< Sequence number incremented on every drive call
 
+    /**
+     * @brief Dispatches a motor command to the hardware.
+     * @param cmd The motor command payload.
+     * @param src String identifying the source of the command (e.g., "manual", "brain").
+     */
     void drive(const MotorCommand& cmd, const std::string& src) {
         std::lock_guard<std::mutex> lk(mtx);
         last_cmd = cmd;
@@ -91,6 +112,10 @@ struct MotorBus {
         hw->drive(cmd.direction, td, cmd.speed, cmd.pickup);
     }
 
+    /**
+     * @brief Triggers an emergency stop, halting all motor movement.
+     * @param src Identifier for the source triggering the E-Stop.
+     */
     void eStop(const std::string& src = "manual") {
         std::lock_guard<std::mutex> lk(mtx);
         estopped        = true;
@@ -99,45 +124,57 @@ struct MotorBus {
         if (hw && hw->isOpen()) hw->eStop();
     }
 
+    /**
+     * @brief Clears the E-Stop state.
+     */
     void resume() {
         std::lock_guard<std::mutex> lk(mtx);
         estopped = false;
     }
 
+    /**
+     * @brief Retrieves a copy of the last dispatched motor command.
+     * @return MotorCommand structure.
+     */
     MotorCommand getLastCmd() const {
         std::lock_guard<std::mutex> lk(mtx);
         return last_cmd;
     }
 };
 
+/// Global motor bus instance
 MotorBus global_motor_bus;
 
-// ══════════════════════════════════════════════════════════════════
-//  BrainState
-// ══════════════════════════════════════════════════════════════════
 
+/**
+ * @brief Holds telemetry data regarding the autonomous logic system.
+ */
 struct BrainState {
-    bool        enabled     = false;
-    std::string mode        = "IDLE";
-    std::string reason      = "";
-    float       front_clear = 0.0f;
+    bool        enabled     = false; ///< True if autonomous mode is active
+    std::string mode        = "IDLE";///< Current behavior tree mode 
+    std::string reason      = "";    ///< Debug string explaining the current mode
+    float       front_clear = 0.0f;  ///< Free distance directly in front of the robot (meters)
 };
+
+/// Global brain state instance
 BrainState  global_brain;
+/// Mutex protecting global_brain
 std::mutex  brain_mutex;
 
-// ══════════════════════════════════════════════════════════════════
-//  Signal handler
-// ══════════════════════════════════════════════════════════════════
 
+/**
+ * @brief Intercepts OS signals (e.g., SIGINT) to ensure graceful shutdown.
+ * @param signum OS signal number.
+ */
 void signalHandler(int) {
     std::cout << "\nShutting down..." << std::endl;
     running = false;
 }
 
-// ══════════════════════════════════════════════════════════════════
-//  Lidar thread
-// ══════════════════════════════════════════════════════════════════
-
+/**
+ * @brief Continuous background thread for fetching Lidar scans.
+ * @param lidar Reference to the initialized LidarController.
+ */
 void lidarThread(LidarController& lidar) {
     while (running) {
         auto scan = lidar.getLatestScan();
@@ -146,8 +183,6 @@ void lidarThread(LidarController& lidar) {
                 std::lock_guard<std::mutex> lk(scan_mutex);
                 global_scan = scan;
             }
-            // Skip expensive ICP/map update when brain is off (manual / off mode).
-            // The scan is still stored above so the radar display stays fresh.
             bool brainOn;
             { std::lock_guard<std::mutex> lk(brain_mutex); brainOn = global_brain.enabled; }
             if (brainOn) global_map.update(scan);
@@ -156,10 +191,10 @@ void lidarThread(LidarController& lidar) {
     }
 }
 
-// ══════════════════════════════════════════════════════════════════
-//  Camera thread
-// ══════════════════════════════════════════════════════════════════
-
+/**
+ * @brief Continuous background thread for capturing frames and performing CV tracking.
+ * @param cam Reference to the initialized CamController.
+ */
 void cameraThread(CamController& cam) {
     const long frame_us = 1000000 / CFG.camFps;
     int  frameCount = 0;
@@ -195,7 +230,6 @@ void cameraThread(CamController& cam) {
             global_tracking.command     = dir.command;
             global_tracking.frameWidth  = CFG.camWidth;
 
-            // Find the largest object for the COLLECT pixel-space check
             global_tracking.targetPixelX = -1.0;
             global_tracking.targetPixelY = -1.0;
             global_tracking.targetArea   = 0.0;
@@ -214,18 +248,17 @@ void cameraThread(CamController& cam) {
     }
 }
 
-// ══════════════════════════════════════════════════════════════════
-//  Brain thread  — delegates to Brain class in Brain.h
-//
-//  State machine (priority order):
-//    1. E-stop active          → IDLE
-//    2. Obstacle < clearDist   → AVOID
-//    3. Target close (area ≥ brain_collect_dist) → COLLECT
-//       Phase A: sidestep left until cup centre is between purple lines
-//       Phase B: drive straight forward with pickup=true
-//    4. Target visible (far)   → CHASE
-//    5. No target              → SEEK
-// ══════════════════════════════════════════════════════════════════
+/**
+ * @brief Autonomous decision loop that processes sensor data and emits motor commands.
+ * * Implements a prioritized state machine:
+ * 1. E-stop active          -> IDLE
+ * 2. Obstacle < clearDist   -> AVOID
+ * 3. Target close (area >= brain_collect_dist) -> COLLECT
+ * Phase A: sidestep left until cup centre is between purple lines
+ * Phase B: drive straight forward with pickup=true
+ * 4. Target visible (far)   -> CHASE
+ * 5. No target              -> SEEK
+ */
 
 void brainThread() {
     const auto period = std::chrono::milliseconds(1000 / CFG.brainHz);
@@ -243,7 +276,7 @@ void brainThread() {
             }
         }
 
-        // ── Read sensor snapshots ──
+        
         std::vector<LidarPoint> scan;
         { std::lock_guard<std::mutex> lk(scan_mutex);     scan = global_scan; }
 
@@ -253,7 +286,7 @@ void brainThread() {
         bool estopped;
         { std::lock_guard<std::mutex> lk(global_motor_bus.mtx); estopped = global_motor_bus.estopped; }
 
-        // ── Build TrackingSnapshot for Brain ──
+        
         TrackingSnapshot snap;
         snap.angle        = ts.angle;
         snap.distance     = ts.distance;
@@ -264,10 +297,10 @@ void brainThread() {
         snap.targetArea   = ts.targetArea;
         snap.frameWidth   = ts.frameWidth;
 
-        // ── Tick ──
+        
         BrainOutput out = brain.tick(estopped, scan, snap);
 
-        // ── Publish ──
+        
         global_motor_bus.drive(out.cmd, "brain");
 
         {
@@ -281,7 +314,9 @@ void brainThread() {
     }
 }
 
-// ---------- Dashboard HTML ----------
+/**
+ * @brief Raw HTML string containing the frontend web dashboard UI and client-side logic.
+ */
 static const std::string DASHBOARD_HTML = R"html(
 <!DOCTYPE html>
 <html lang="en">
@@ -1320,14 +1355,22 @@ function sendMotor() {
 <!-- " -->
 )html";
 
-// ---------- main ----------
+/**
+ * @brief Application entry point.
+ *
+ * Configures the system by loading `config.txt`, initializing hardware ports,
+ * and dispatching all background task threads (lidar, camera, brain). Configures
+ * and blocks on the `crow` web app to handle client connections. 
+ *
+ * @return int Standard exit status (0 on graceful shutdown, non-zero on failure).
+ */
 int main() {
     signal(SIGINT, signalHandler);
 	signal(SIGPIPE, SIG_IGN);
-    // --- Load config ---
+    
     loadConfig("config.txt", CFG);
 
-    // --- Lidar ---
+    
     LidarController lidar(CFG.lidarPort, CFG.flipLidar);
     lidar.setExcludeZones(CFG.lidarExclude);
     if (!lidar.initialize()) {
@@ -1335,7 +1378,7 @@ int main() {
         return -1;
     }
 
-    // --- Camera ---
+    
     CamController cam(0, CFG.camWidth, CFG.camHeight);
     for (const auto& c : CFG.colors)
         cam.addTrackedColor(c.name,
@@ -1345,7 +1388,6 @@ int main() {
     cam.setTrackingStrategy(CamController::TrackingStrategy::LARGEST);
     cam.setMinArea(CFG.minArea);
     cam.setDeadOnThreshold(CFG.deadOnThresh);
-    // Set the purple collection zone guide lines from config
     cam.setCollectionZone(CFG.brainCollectXMin, CFG.brainCollectXMax);
     if (!cam.initialize()) {
         std::cerr << "Failed to initialize camera\n";
@@ -1354,7 +1396,7 @@ int main() {
     cam.enableStreaming(true, CFG.streamPort);
     std::cout << "MJPEG stream : http://<your-pi-ip>:" << CFG.streamPort << "\n";
 
-    // --- Motor ---
+    
     MotorController motor(CFG.motorPort);
     if (!motor.isOpen()) {
         std::cerr << "Warning: MotorController failed to open " << CFG.motorPort
@@ -1364,12 +1406,12 @@ int main() {
     }
     global_motor_bus.hw = &motor;
 
-    // --- Threads ---
+    
     std::thread t_lidar(lidarThread,  std::ref(lidar));
     std::thread t_cam  (cameraThread, std::ref(cam));
     std::thread t_brain(brainThread);
 
-    // --- Crow dashboard ---
+    
     crow::SimpleApp app;
 
     CROW_ROUTE(app, "/")([&](){ return DASHBOARD_HTML; });
@@ -1522,10 +1564,6 @@ int main() {
         return crow::response(200, "ok");
     });
 
-    // ── Dedicated WebSocket app — motor commands only ─────────────────────
-    // Runs on CFG.wsPort (default 8082), completely isolated from the dashboard
-    // HTTP / MJPEG traffic on CFG.webPort.  Nothing else shares this port, so
-    // motor commands are never queued behind a slow JSON or image response.
     crow::SimpleApp wsApp;
 
     CROW_WEBSOCKET_ROUTE(wsApp, "/ws/motor")
@@ -1534,7 +1572,7 @@ int main() {
             (void)conn;
         })
         .onclose([&](crow::websocket::connection& conn, const std::string&, uint16_t){
-            // Stop the robot if the controlling client disconnects.
+            
             std::cout << "[WS] motor client disconnected — stopping\n";
             MotorCommand stop;
             stop.speed = 0;
@@ -1543,7 +1581,7 @@ int main() {
         })
         .onmessage([&](crow::websocket::connection& /*conn*/,
                         const std::string& data, bool /*is_binary*/){
-            // Reject commands while brain is active
+            
             {
                 std::lock_guard<std::mutex> lk(brain_mutex);
                 if (global_brain.enabled) return;
@@ -1562,15 +1600,12 @@ int main() {
     std::cout << "Dashboard    : http://<your-pi-ip>:" << CFG.webPort << "\n";
     std::cout << "Motor WS     : ws://<your-pi-ip>:"   << CFG.wsPort  << "/ws/motor\n";
 
-    // Run the WS app in its own thread — never blocks the dashboard.
     wsApp.loglevel(crow::LogLevel::WARNING);
     auto wsFuture = wsApp.port(CFG.wsPort).multithreaded().run_async();
 
-    // Dashboard app blocks the main thread until shutdown.
     app.loglevel(crow::LogLevel::WARNING);
     app.port(CFG.webPort).multithreaded().run();
 
-    // Shutdown
     running = false;
     {
         std::lock_guard<std::mutex> lk(brain_mutex);

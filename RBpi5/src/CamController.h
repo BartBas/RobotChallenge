@@ -1,6 +1,82 @@
 #ifndef CAM_CONTROLLER_H
 #define CAM_CONTROLLER_H
 
+/**
+ * @file CamController.h
+ * @brief Camera capture, colour tracking, and MJPEG streaming interface.
+ *
+ * @details
+ * Provides a self-contained pipeline that goes from raw camera frames to
+ * a structured `Direction` output suitable for passing directly to the
+ * `Brain`. Each call to `captureFrame()` + `getDirection()` constitutes
+ * one tracking cycle.
+ *
+ * ### Pipeline Overview
+ * ```
+ * captureFrame()
+ *   └─ BGR → HSV conversion
+ *   └─ per-colour inRange masks → combined mask
+ *   └─ contour detection → RedObject list
+ *   └─ elevated-object filter
+ *
+ * getDirection()
+ *   └─ select primary target via TrackingStrategy
+ *   └─ compute bearing angle and "dead-on" command
+ *   └─ return Direction{angle, command, distance, objectCount}
+ * ```
+ *
+ * ### Colour Tracking
+ * Up to `MAX_TRACKED_COLORS` (3) named colours can be registered at once.
+ * Each colour is defined by two HSV bands (lower and upper wrap-around
+ * ranges), which are OR-combined into a single mask each frame.
+ * The legacy `setRedRangeLower()` / `setRedRangeUpper()` methods are kept
+ * for backwards compatibility and map to a colour named `"red"`.
+ *
+ * ### Tracking Strategies
+ * | Strategy            | Primary target chosen by                      |
+ * |---------------------|-----------------------------------------------|
+ * | LARGEST             | Greatest contour area                         |
+ * | CLOSEST_TO_CENTER   | Smallest horizontal distance from frame centre|
+ * | LEFTMOST            | Smallest centre-x pixel coordinate           |
+ * | LOWEST              | Largest centre-y pixel coordinate (near floor)|
+ *
+ * ### Elevated-Object Filter
+ * Rejects colour blobs that are both large (area > `elevatedAreaThresh_`)
+ * and positioned high in the frame (normalised Y < `elevatedYThresh_`).
+ * With the camera mounted ~7 cm off the ground, real cups always appear in
+ * the lower portion of the frame, so large blobs near the top are almost
+ * certainly elevated furniture.
+ *
+ * ### Collection Zone Guide Lines
+ * Two vertical guide lines drawn on the MJPEG stream at normalised X
+ * positions `collectXMin_` and `collectXMax_` mark the horizontal window
+ * that the `Brain` uses for COLLECT Phase A alignment.
+ *
+ * ### MJPEG Streaming
+ * When enabled via `enableStreaming()`, a background thread serves a
+ * single-client MJPEG stream on the configured port. Frames include
+ * detection overlays and collection-zone guide lines.
+ *
+ * ### Thread Safety
+ * `captureFrame()` and `getFrameWithVisualization()` both acquire
+ * `frameMutex_`. Do not call them simultaneously from different threads
+ * without external coordination.
+ *
+ * ### Usage
+ * @code
+ * CamController cam(0, 640, 480);
+ * cam.addTrackedColor("orange", 5,20,120,80, 170,180,120,80);
+ * cam.setElevatedFilter(3000.0, 0.40f);
+ * cam.enableStreaming(true, 8081);
+ * cam.initialize();
+ *
+ * while (running) {
+ *     cam.captureFrame();
+ *     auto dir = cam.getDirection();
+ * }
+ * @endcode
+ */
+
 #include <opencv2/opencv.hpp>
 #include <vector>
 #include <string>
@@ -69,12 +145,10 @@ public:
     void setFlip(bool flip);
     bool isFlipped() const;
 
-    // Collection zone guide lines
     void  setCollectionZone(float xMin, float xMax);
     float getCollectionZoneMin() const { return collectXMin_; }
     float getCollectionZoneMax() const { return collectXMax_; }
 
-    // Multi-color tracking
     bool addTrackedColor(const std::string& name,
                          int lowerHueMin, int lowerHueMax, int lowerSatMin, int lowerValMin,
                          int upperHueMin, int upperHueMax, int upperSatMin, int upperValMin);
@@ -84,7 +158,6 @@ public:
     std::vector<std::string> getColorNames() const;
     void clearAllColors();
 
-    // Legacy red color setters
     void setRedRangeLower(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
     void setRedRangeUpper(int hueMin, int hueMax, int satMin = 100, int valMin = 100);
 
@@ -92,7 +165,6 @@ public:
     bool isStreamingEnabled() const;
     int getStreamPort() const;
 
-    // Elevated-object filter (rejects large blobs high in frame)
     void setElevatedFilter(double areaThresh, float yThresh) {
         elevatedAreaThresh_ = areaThresh;
         elevatedYThresh_    = yThresh;
@@ -122,19 +194,15 @@ private:
     std::thread streamThread;
     std::mutex frameMutex;
 
-    // Collection zone line positions (normalised 0..1)
     float collectXMin_ = 0.55f;
     float collectXMax_ = 0.75f;
 
-    // Elevated-object filter — rejects large blobs sitting high in the frame
-    // (e.g. chair backs).  Defaults match the values in Config.h.
-    double elevatedAreaThresh_ = 3000.0;  // px²: only applied when area exceeds this
-    float  elevatedYThresh_    = 0.40f;   // normalised Y: blobs above this line are suspect
+    double elevatedAreaThresh_ = 3000.0;
+    float  elevatedYThresh_    = 0.40f;
 
-    // Pre-allocated working Mats — reused every frame to avoid heap churn
-    cv::Mat hsvFrame_;       // BGR->HSV conversion target
-    cv::Mat combinedMask_;   // union of all colour masks
-    cv::Mat tmpMask_;        // scratch for each inRange call
+    cv::Mat hsvFrame_;
+    cv::Mat combinedMask_;
+    cv::Mat tmpMask_;
 
     bool flip180;
 

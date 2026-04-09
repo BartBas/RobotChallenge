@@ -6,6 +6,23 @@
 using namespace cv;
 using namespace std;
 
+/**
+ * @brief Constructs a CamController and pre-allocates internal frame buffers.
+ *
+ * @details
+ * Sets all tuneable parameters to their defaults and registers the built-in
+ * `"red"` colour (hue bands 0–10 and 170–180) so the controller is usable
+ * immediately after construction without any further colour configuration.
+ *
+ * The combined mask and temporary mask are allocated once here to avoid
+ * per-frame heap allocations inside the hot capture path.
+ *
+ * @param cameraIndex  V4L2 / OpenCV device index (ignored when rpicam-vid is
+ *                     used). Default: @c 0.
+ * @param width        Desired capture width in pixels. Default: @c 640.
+ * @param height       Desired capture height in pixels. Default: @c 480.
+ */
+ 
 CamController::CamController(int cameraIndex, int width, int height)
     : cameraIndex(cameraIndex)
     , frameWidth(width)
@@ -31,11 +48,33 @@ CamController::CamController(int cameraIndex, int width, int height)
                     170, 180, 100, 100);
 }
 
+/**
+ * @brief Destructor — stops streaming and releases the camera resource.
+ *
+ * @details
+ * Calls `enableStreaming(false)` to signal the stream thread and join it,
+ * then calls `release()` to close the rpicam-vid pipe or the OpenCV capture.
+ */
 CamController::~CamController() {
     enableStreaming(false);
     release();
 }
 
+/**
+ * @brief Opens the camera and starts the rpicam-vid capture pipeline.
+ *
+ * @details
+ * Launches `rpicam-vid` as a child process via `popen()`, requesting raw
+ * YUV 4:2:0 output on stdout at the resolution configured in the constructor.
+ * If the pipe cannot be opened the function prints an error and returns
+ * @c false; otherwise it sets the `useRpiCam` flag and returns @c true.
+ *
+ * @note This method is specific to Raspberry Pi. When porting to a platform
+ *       without `rpicam-vid`, replace the body with an `cv::VideoCapture`
+ *       open call and clear the `useRpiCam` flag.
+ *
+ * @return @c true if rpicam-vid started successfully, @c false otherwise.
+ */
 bool CamController::initialize() {
     cout << "Initializing camera using rpicam-vid..." << endl;
 
@@ -51,14 +90,106 @@ bool CamController::initialize() {
     return true;
 }
 
+/**
+ * @brief Enables or disables 180° frame rotation.
+ * @param flip @c true to rotate every captured frame by 180°.
+ */
 void CamController::setFlip(bool flip) { flip180 = flip; }
+
+/**
+ * @brief Returns whether 180° frame rotation is active.
+ * @return @c true if frames are currently flipped.
+ */
 bool CamController::isFlipped() const  { return flip180; }
 
+/**
+ * @brief Returns @c true if the camera (or rpicam-vid pipe) is open.
+ * @return @c true when a valid capture source is available.
+ */
+bool CamController::isOpened() const {
+    return useRpiCam ? cameraStream != nullptr : cap.isOpened();
+}
+
+/**
+ * @brief Releases the active camera resource.
+ *
+ * @details
+ * Closes the `rpicam-vid` pipe with `pclose()` when running in RPi mode,
+ * or releases the OpenCV `VideoCapture` handle otherwise.
+ */
+void CamController::release() {
+    if (useRpiCam && cameraStream) { pclose(cameraStream); cameraStream = nullptr; }
+    else if (cap.isOpened()) cap.release();
+}
+
+/**
+ * @brief Returns a clone of the most recently captured raw frame.
+ * @return A deep copy of `currentFrame` (BGR, unmodified).
+ */
+cv::Mat CamController::getFrame() const { return currentFrame.clone(); }
+
+/**
+ * @brief Returns a clone of the most recently captured frame with all
+ *        detection overlays rendered on top.
+ *
+ * @details
+ * Clones `currentFrame`, then calls `drawVisualization()` on the copy so
+ * the stored frame is never modified. Acquires `frameMutex_` indirectly
+ * through the clone operation — do not call simultaneously with
+ * `captureFrame()` from another thread.
+ *
+ * @return BGR frame with bounding boxes, labels, guide lines, and
+ *         centre-to-target line drawn on it.
+ */
+cv::Mat CamController::getFrameWithVisualization() {
+    cv::Mat vis = currentFrame.clone();
+    drawVisualization(vis);
+    return vis;
+}
+
+/**
+ * @brief Sets the horizontal collection zone used for stream guide lines and
+ *        alignment feedback.
+ *
+ * @details
+ * Both values are normalised (0.0 = left edge, 1.0 = right edge).  The
+ * `Brain` uses this same window to decide when the robot is aligned enough
+ * to begin COLLECT Phase A.
+ *
+ * @param xMin Normalised left boundary of the collection zone.
+ * @param xMax Normalised right boundary of the collection zone.
+ */
 void CamController::setCollectionZone(float xMin, float xMax) {
     collectXMin_ = xMin;
     collectXMax_ = xMax;
 }
 
+/**
+ * @brief Registers a new named colour for tracking.
+ *
+ * @details
+ * Each colour is described by two HSV bands — a lower-hue band and an
+ * upper-hue band — which are OR-combined into the frame mask each cycle.
+ * This two-band design naturally handles red, which wraps around the HSV
+ * hue circle.
+ *
+ * If @p name already exists its definition is updated in-place (no slot
+ * is consumed).  If the table is full and @p name is new the function
+ * prints an error and returns @c false.
+ *
+ * @param name      Unique identifier for the colour (e.g. `"orange"`).
+ * @param lHueMin   Lower band: minimum hue value [0, 179].
+ * @param lHueMax   Lower band: maximum hue value [0, 179].
+ * @param lSatMin   Lower band: minimum saturation [0, 255].
+ * @param lValMin   Lower band: minimum value (brightness) [0, 255].
+ * @param uHueMin   Upper band: minimum hue value [0, 179].
+ * @param uHueMax   Upper band: maximum hue value [0, 179].
+ * @param uSatMin   Upper band: minimum saturation [0, 255].
+ * @param uValMin   Upper band: minimum value (brightness) [0, 255].
+ *
+ * @return @c true if the colour was added or updated successfully,
+ *         @c false if `MAX_TRACKED_COLORS` would be exceeded.
+ */
 bool CamController::addTrackedColor(const std::string& name,
                                      int lHueMin, int lHueMax, int lSatMin, int lValMin,
                                      int uHueMin, int uHueMax, int uSatMin, int uValMin)
@@ -79,6 +210,13 @@ bool CamController::addTrackedColor(const std::string& name,
     return true;
 }
 
+/**
+ * @brief Removes a previously registered colour from tracking.
+ *
+ * @param name Name of the colour to remove.
+ * @return @c true if the colour was found and removed, @c false if it
+ *         did not exist.
+ */
 bool CamController::removeTrackedColor(const std::string& name) {
     auto it = trackedColors.find(name);
     if (it == trackedColors.end()) { cerr << "Color '" << name << "' not found\n"; return false; }
@@ -87,11 +225,25 @@ bool CamController::removeTrackedColor(const std::string& name) {
     return true;
 }
 
+/**
+ * @brief Returns @c true if a colour with the given name is currently tracked.
+ * @param name Colour identifier to look up.
+ * @return @c true if @p name is in the tracking table.
+ */
 bool CamController::hasColor(const std::string& name) const {
     return trackedColors.count(name) > 0;
 }
+
+/**
+ * @brief Returns the number of colours currently registered for tracking.
+ * @return Integer in the range [0, MAX_TRACKED_COLORS].
+ */
 int CamController::getColorCount() const { return (int)trackedColors.size(); }
 
+/**
+ * @brief Returns the names of all currently tracked colours.
+ * @return Vector of colour name strings in map iteration order.
+ */
 std::vector<std::string> CamController::getColorNames() const {
     std::vector<std::string> v;
     v.reserve(trackedColors.size());
@@ -99,24 +251,71 @@ std::vector<std::string> CamController::getColorNames() const {
     return v;
 }
 
+/**
+ * @brief Removes every registered colour from the tracking table.
+ *
+ * @note After calling this, no objects will be detected until at least one
+ *       colour is re-registered with `addTrackedColor()`.
+ */
 void CamController::clearAllColors() {
     trackedColors.clear();
     cout << "Cleared all tracked colors.\n";
 }
 
+/**
+ * @brief Sets the lower HSV band for the built-in `"red"` colour entry.
+ *
+ * @details
+ * Legacy compatibility wrapper. Has no effect if `"red"` has been removed
+ * from the tracking table.
+ *
+ * @param hMin Minimum hue  [0, 179].
+ * @param hMax Maximum hue  [0, 179].
+ * @param sMin Minimum saturation [0, 255]. Default: 100.
+ * @param vMin Minimum value (brightness) [0, 255]. Default: 100.
+ */
 void CamController::setRedRangeLower(int hMin, int hMax, int sMin, int vMin) {
     if (!hasColor("red")) return;
     trackedColors["red"].lowerMin = Scalar(hMin, sMin, vMin);
     trackedColors["red"].lowerMax = Scalar(hMax, 255, 255);
 }
+
+/**
+ * @brief Sets the upper HSV band for the built-in `"red"` colour entry.
+ *
+ * @details
+ * Legacy compatibility wrapper. Has no effect if `"red"` has been removed
+ * from the tracking table.
+ *
+ * @param hMin Minimum hue  [0, 179].
+ * @param hMax Maximum hue  [0, 179].
+ * @param sMin Minimum saturation [0, 255]. Default: 100.
+ * @param vMin Minimum value (brightness) [0, 255]. Default: 100.
+ */
 void CamController::setRedRangeUpper(int hMin, int hMax, int sMin, int vMin) {
     if (!hasColor("red")) return;
     trackedColors["red"].upperMin = Scalar(hMin, sMin, vMin);
     trackedColors["red"].upperMax = Scalar(hMax, 255, 255);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
+/**
+ * @brief Captures one frame from the camera and runs the full detection
+ *        pipeline on it.
+ *
+ * @details
+ * **RPi path:** reads exactly one YUV 4:2:0 frame from the rpicam-vid
+ * pipe, converts it to BGR, and optionally flips it 180°. The frame is
+ * stored under `frameMutex_` so the streaming thread can access it safely.
+ *
+ * **Generic path:** grabs from the OpenCV `VideoCapture` and flips if
+ * requested.
+ *
+ * After storing the frame, `detectColorPixels()` and `findColorObjects()`
+ * are called to populate `detectedObjects_` for the current cycle.
+ *
+ * @return @c true if a frame was successfully read, @c false on stream
+ *         error or empty frame.
+ */
 bool CamController::captureFrame()
 {
     if (useRpiCam) {
@@ -148,8 +347,19 @@ bool CamController::captureFrame()
     return true;
 }
 
-// ── detectColorPixels ────────────────────────────────────────────────────────
-//  One HSV conversion, one combined mask — no per-frame allocations.
+/**
+ * @brief Converts the current BGR frame to HSV and builds a combined colour
+ *        mask for all registered colours.
+ *
+ * @details
+ * Performs a single `cv::cvtColor` (BGR → HSV), then iterates over every
+ * registered `ColorRange`. For each colour both the lower and upper HSV
+ * bands are thresholded with `cv::inRange` into `tmpMask_`, which is then
+ * OR-merged into `combinedMask_`. Using pre-allocated member mats avoids
+ * heap allocations on the hot path.
+ *
+ * Called internally by `captureFrame()`.
+ */
 void CamController::detectColorPixels()
 {
     cv::cvtColor(currentFrame, hsvFrame_, cv::COLOR_BGR2HSV);
@@ -164,9 +374,28 @@ void CamController::detectColorPixels()
     }
 }
 
-// ── findColorObjects ─────────────────────────────────────────────────────────
-//  Single findContours on the combined mask — no .clone(), no per-colour loops.
-//  Colour name resolved by a cheap HSV pixel lookup at the contour centroid.
+/**
+ * @brief Finds and filters colour blobs in the current combined mask.
+ *
+ * @details
+ * Runs `cv::findContours` once on `combinedMask_` (RETR_EXTERNAL, no mask
+ * copy needed). For each contour whose area exceeds `minArea_`:
+ *
+ * 1. **Centroid** is computed from image moments (falls back to bounding-box
+ *    centre when the moment is zero).
+ * 2. **Elevated-object filter** rejects any blob that is both large
+ *    (area > `elevatedAreaThresh_`) and sits in the top portion of the frame
+ *    (normalised Y < `elevatedYThresh_`). With the camera ~7 cm off the
+ *    ground, real cups always appear low in the frame; large blobs near the
+ *    top are assumed to be elevated furniture.
+ * 3. **Colour identification** samples the HSV pixel at the centroid and
+ *    matches it against each registered `ColorRange`.  The first match wins;
+ *    unmatched blobs are labelled `"unknown"`.
+ *
+ * Called internally by `captureFrame()`.
+ *
+ * @return Vector of `RedObject` structs, one per accepted blob.
+ */
 std::vector<CamController::RedObject> CamController::findColorObjects()
 {
     std::vector<RedObject> objects;
@@ -244,12 +473,43 @@ std::vector<CamController::RedObject> CamController::findColorObjects()
     return objects;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
+/**
+ * @brief Public entry point — returns the tracking direction for the current
+ *        frame.
+ *
+ * @details Delegates to `analyzeColorObjects()`.
+ *
+ * @return `Direction` struct with bearing angle, human-readable command
+ *         string, normalised distance, and total object count.
+ */
 CamController::Direction CamController::getDirection() {
     return analyzeColorObjects();
 }
 
+/**
+ * @brief Selects the primary target according to the active
+ *        `TrackingStrategy` and computes the resulting `Direction`.
+ *
+ * @details
+ * If no objects are detected, returns a `Direction` with `command =
+ * "NO TARGET"` and zeroed angle / distance fields.
+ *
+ * Otherwise the primary target is chosen as follows:
+ * - **LARGEST** — object with the greatest contour area.
+ * - **CLOSEST_TO_CENTER** — object whose centre X is nearest the frame
+ *   centre.
+ * - **LEFTMOST** — object with the smallest centre X coordinate.
+ * - **LOWEST** — object with the largest centre Y coordinate (closest to
+ *   the bottom of the frame, i.e. nearest the robot).
+ *
+ * The bearing angle is mapped linearly from the target's horizontal
+ * position: centre → 0°, full right → +90°, full left → −90°.  When
+ * `|angle| ≤ deadOnThreshold` the command is `"FORWARD"`, otherwise it
+ * is `"LEFT N degrees"` or `"RIGHT N degrees"`, both suffixed with the
+ * matched colour name.
+ *
+ * @return Populated `Direction` struct.
+ */
 CamController::Direction CamController::analyzeColorObjects()
 {
     Direction dir;
@@ -298,24 +558,82 @@ CamController::Direction CamController::analyzeColorObjects()
     return dir;
 }
 
+/**
+ * @brief Returns a copy of the objects detected during the last
+ *        `captureFrame()` call.
+ * @return Vector of `RedObject` structs (may be empty if none detected).
+ */
 std::vector<CamController::RedObject> CamController::getDetectedObjects() const {
     return detectedObjects;
 }
 
+/**
+ * @brief Sets the active tracking strategy.
+ * @param s One of `LARGEST`, `CLOSEST_TO_CENTER`, `LEFTMOST`, or `LOWEST`.
+ */
 void   CamController::setTrackingStrategy(TrackingStrategy s) { strategy = s; }
+
+/**
+ * @brief Returns the currently active tracking strategy.
+ * @return The current `TrackingStrategy` enum value.
+ */
 CamController::TrackingStrategy CamController::getTrackingStrategy() const { return strategy; }
+
+/**
+ * @brief Sets the minimum contour area (px²) for a blob to be accepted.
+ *
+ * @details Blobs smaller than this value are silently discarded in
+ *          `findColorObjects()`. Increase to reduce noise; decrease to
+ *          detect smaller or more distant objects.
+ *
+ * @param a Minimum area in pixels squared. Default: @c 500.0.
+ */
 void   CamController::setMinArea(double a)          { minArea = a; }
+
+/**
+ * @brief Returns the current minimum contour area threshold.
+ * @return Minimum area in pixels squared.
+ */
 double CamController::getMinArea() const            { return minArea; }
+
+/**
+ * @brief Sets the angular dead-band within which the target is considered
+ *        centred.
+ *
+ * @details When `|bearing angle| ≤ threshold` the command is reported as
+ *          `"FORWARD"` rather than a directional turn. Measured in degrees.
+ *
+ * @param t Dead-on threshold in degrees. Default: @c 5.0.
+ */
 void   CamController::setDeadOnThreshold(double t)  { deadOnThreshold = t; }
+
+/**
+ * @brief Returns the current dead-on angular threshold.
+ * @return Threshold in degrees.
+ */
 double CamController::getDeadOnThreshold() const    { return deadOnThreshold; }
-cv::Mat CamController::getFrame() const             { return currentFrame.clone(); }
 
-cv::Mat CamController::getFrameWithVisualization() {
-    cv::Mat vis = currentFrame.clone();
-    drawVisualization(vis);
-    return vis;
-}
-
+/**
+ * @brief Renders all detection overlays onto @p frame in-place.
+ *
+ * @details Draws the following elements:
+ * - **Collection zone guide lines** — two vertical purple lines at
+ *   `collectXMin_` and `collectXMax_` (normalised X), labelled
+ *   `"COLLECT ZONE"`.
+ * - **Per-object markers** — a circle at the centroid and a bounding
+ *   rectangle for every detected object.  The primary target (selected
+ *   by the current strategy) is drawn in green; all others in grey.
+ *   Each is labelled with its colour name, index, and `"(TARGET)"` tag
+ *   where applicable.
+ * - **Frame-centre dot** — blue filled circle at (cols/2, rows/2).
+ * - **Target line** — yellow line from the frame centre to the primary
+ *   target centroid.
+ * - **Alignment highlight** — when the primary target's normalised X
+ *   falls within the collection zone a semi-transparent green rectangle
+ *   is overlaid and `"ALIGNED"` is printed.
+ *
+ * @param frame BGR image to draw on (modified in-place).
+ */
 void CamController::drawVisualization(cv::Mat& frame)
 {
     // ── Collection zone guide lines ───────────────────────────────────────
@@ -388,15 +706,24 @@ void CamController::drawVisualization(cv::Mat& frame)
     }
 }
 
-bool CamController::isOpened() const {
-    return useRpiCam ? cameraStream != nullptr : cap.isOpened();
-}
-
-void CamController::release() {
-    if (useRpiCam && cameraStream) { pclose(cameraStream); cameraStream = nullptr; }
-    else if (cap.isOpened()) cap.release();
-}
-
+/**
+ * @brief Enables or disables the background MJPEG streaming server.
+ *
+ * @details
+ * **Enabling:** stores the port, sets `streamingEnabled` to @c true, and
+ * launches a detached `std::thread` running `streamingLoop()`.  A message
+ * with the stream URL is printed to stdout.
+ *
+ * **Disabling:** sets `streamingEnabled` to @c false (which causes
+ * `streamingLoop()` to exit its inner loops on the next iteration) and
+ * joins the thread.
+ *
+ * Calling `enableStreaming(true)` while already streaming, or
+ * `enableStreaming(false)` while not streaming, is a no-op.
+ *
+ * @param enable @c true to start streaming, @c false to stop.
+ * @param port   TCP port the server will listen on. Default: @c 8080.
+ */
 void CamController::enableStreaming(bool enable, int port) {
     if (enable && !streamingEnabled) {
         streamPort = port; streamingEnabled = true;
@@ -409,9 +736,39 @@ void CamController::enableStreaming(bool enable, int port) {
     }
 }
 
+/**
+ * @brief Returns whether the MJPEG streaming server is currently running.
+ * @return @c true if the stream thread is active.
+ */
 bool CamController::isStreamingEnabled() const { return streamingEnabled; }
-int  CamController::getStreamPort()       const { return streamPort; }
 
+/**
+ * @brief Returns the TCP port the MJPEG server is (or will be) listening on.
+ * @return Port number.
+ */
+int  CamController::getStreamPort() const { return streamPort; }
+
+/**
+ * @brief Background thread body for the single-client MJPEG streaming server.
+ *
+ * @details
+ * Creates a TCP socket, binds to `streamPort`, and enters an accept loop.
+ * For each connected client:
+ * 1. Sends the HTTP multipart response header.
+ * 2. Enters a frame loop that grabs the latest visualised frame (under
+ *    `frameMutex`), JPEG-encodes it at quality 80, wraps it in a MIME
+ *    boundary part, and sends it.
+ * 3. Sleeps ~66 ms between frames to target ~15 FPS.
+ * 4. Exits the frame loop and closes the client socket when `send()`
+ *    fails (client disconnected) or `streamingEnabled` becomes @c false.
+ *
+ * Only one client is served at a time (`listen(srv, 1)`). The server
+ * socket is closed when `streamingEnabled` becomes @c false and the
+ * accept loop exits.
+ *
+ * @note Called exclusively by the thread launched in `enableStreaming()`.
+ *       Do not call directly.
+ */
 void CamController::streamingLoop()
 {
     int srv = socket(AF_INET, SOCK_STREAM, 0);
