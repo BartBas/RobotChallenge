@@ -1,18 +1,13 @@
 var searchData=
 [
-  ['dashboard_5fhtml_0',['DASHBOARD_HTML',['../main_8cpp.html#a4bcb32981a3d80cd17232d64fc8dea37',1,'main.cpp']]],
-  ['deadonthresh_1',['deadOnThresh',['../struct_robot_config.html#a70c81c90d7edb2db16591e5eb2316835',1,'RobotConfig']]],
-  ['deadonthreshold_2',['deadOnThreshold',['../class_cam_controller.html#a3832b93789246f518406a796dbd3fc04',1,'CamController']]],
-  ['detectcolorpixels_3',['detectColorPixels',['../class_cam_controller.html#a13561ab26d2202517202a11a62fb2ac7',1,'CamController']]],
-  ['detectedobjects_4',['detectedObjects',['../class_cam_controller.html#aa53f6a6a0ca18e10b9ba610172ff7815',1,'CamController']]],
-  ['direction_5',['Direction',['../struct_cam_controller_1_1_direction.html',1,'CamController']]],
-  ['direction_6',['direction',['../struct_motor_command.html#a874e5bc77c8a69b3b64e3d085250c547',1,'MotorCommand']]],
-  ['direction_20convention_7',['Direction Convention',['../_motor_controller_8h.html#autotoc_md41',1,'Direction Convention'],['../_brain_8h.html#autotoc_md3',1,'Motor Direction Convention']]],
-  ['distance_8',['distance',['../struct_tracking_snapshot.html#af20ca2d6b43d9eaa86c91c70a259f6e9',1,'TrackingSnapshot::distance'],['../struct_cam_controller_1_1_direction.html#ad545040c4202992e18e8634d705162af',1,'CamController::Direction::distance'],['../struct_tracking_state.html#adc02e7065522017a7181bba0ccfedbc2',1,'TrackingState::distance']]],
-  ['downsample_20strategy_9',['ICP Downsample Strategy',['../_map_controller_8cpp.html#autotoc_md27',1,'']]],
-  ['drawvisualization_10',['drawVisualization',['../class_cam_controller.html#a0fb922e73df424b0956f82458aaf5277',1,'CamController']]],
-  ['drive_11',['drive',['../struct_motor_bus.html#aca48c94770fbe5b63d7c4bfbd9fe813f',1,'MotorBus::drive()'],['../class_motor_controller.html#a046adc1f48e07ac91b913a38e5e6e133',1,'MotorController::drive()']]],
-  ['driveoverstart_5f_12',['driveOverStart_',['../class_brain.html#a2abc89a4f68fd93cbfcec9e84fc6b7e8',1,'Brain']]],
-  ['driveovertick_13',['driveOverTick',['../class_brain.html#a8bd1d89b7c0f6de139e1b6be119ddc40',1,'Brain']]],
-  ['drv_14',['drv',['../_lidar_controller_8cpp.html#ab6813eca60672080e618af40c4e68bb3',1,'LidarController.cpp']]]
+  ['actual_5ffps_0',['actual_fps',['../struct_tracking_state.html#a7f0ad3fba1f69eb2fd63d3dc39c32abb',1,'TrackingState']]],
+  ['addtrackedcolor_1',['addTrackedColor',['../class_cam_controller.html#a7ffda5adf71614ae33a76f5ed1d427d5',1,'CamController']]],
+  ['analyzecolorobjects_2',['analyzeColorObjects',['../class_cam_controller.html#a10ade0be7792240b5342bf0a01cb272a',1,'CamController']]],
+  ['angle_3',['angle',['../struct_tracking_snapshot.html#af5a555ad4b351d685610de8000181188',1,'TrackingSnapshot::angle'],['../struct_cam_controller_1_1_direction.html#a26e26edcb21050cfee411a3a48f30460',1,'CamController::Direction::angle'],['../struct_lidar_point.html#abe16a5fcef0d34edc8152ceb6ad5154d',1,'LidarPoint::angle'],['../struct_tracking_state.html#a5103cf6753cfa49670388d64a1856436',1,'TrackingState::angle']]],
+  ['angle_20convention_4',['Angle Convention',['../_lidar_controller_8h.html#autotoc_md25',1,'']]],
+  ['anglemax_5',['angleMax',['../struct_exclude_zone.html#a6e397c61cb3d6f7b9ae98aade0940346',1,'ExcludeZone']]],
+  ['anglemin_6',['angleMin',['../struct_exclude_zone.html#ac72f955ddb91d999996e67b0f75cb988',1,'ExcludeZone']]],
+  ['applied_20to_20each_20scan_7',['Filtering Applied to Each Scan',['../_lidar_controller_8h.html#autotoc_md24',1,'']]],
+  ['architecture_8',['Repository &amp;amp; System Architecture',['../index.html#arch_sec',1,'']]],
+  ['area_9',['area',['../struct_cam_controller_1_1_red_object.html#a89fcc0d4ca18426bfa48c5884de19be0',1,'CamController::RedObject']]]
 ];

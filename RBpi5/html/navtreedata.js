@@ -25,6 +25,7 @@
 var NAVTREE =
 [
   [ "Robot Challange", "index.html", [
+    [ "Project Title: Robot Challenge: Cup Retriever", "index.html", "index" ],
     [ "Classes", "annotated.html", [
       [ "Class List", "annotated.html", "annotated_dup" ],
       [ "Class Index", "classes.html", null ],
@@ -51,7 +52,7 @@ var NAVTREE =
 var NAVTREEINDEX =
 [
 "_brain_8h.html",
-"struct_lidar_point.html#a0519a09139cc23e58d196595937e1a15"
+"struct_cam_controller_1_1_red_object.html#a89fcc0d4ca18426bfa48c5884de19be0"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';

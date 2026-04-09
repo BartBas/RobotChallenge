@@ -1,10 +1,8 @@
 var searchData=
 [
-  ['packet_20encoding_20sendpacket_0',['Packet Encoding (&lt;span class=&quot;tt&quot;&gt;sendPacket&lt;/span&gt;)',['../_motor_controller_8cpp.html#autotoc_md38',1,'']]],
-  ['packet_20format_1',['Packet Format',['../_motor_controller_8h.html#autotoc_md40',1,'']]],
-  ['parsing_20rules_2',['Parsing Rules',['../_config_8cpp.html#autotoc_md14',1,'']]],
-  ['per_20lidar_20scan_3',['Update Cycle (called once per lidar scan)',['../_map_controller_8h.html#autotoc_md31',1,'']]],
-  ['phases_4',['COLLECT Sub-phases',['../_brain_8h.html#autotoc_md1',1,'']]],
-  ['pipeline_20overview_5',['Pipeline Overview',['../_cam_controller_8h.html#autotoc_md6',1,'']]],
-  ['priority_20order_20highest_20first_6',['Priority Order (highest first)',['../_brain_8h.html#autotoc_md2',1,'']]]
+  ['level_20brain_20logic_0',['High-Level Brain Logic',['../index.html#brain_logic_sec',1,'']]],
+  ['level_20mapping_20inside_20the_2024_20bit_20payload_1',['Bit-Level Mapping (Inside the 24-bit payload)',['../index.html#bit_mapping',1,'']]],
+  ['lidar_20scan_2',['Update Cycle (called once per lidar scan)',['../_map_controller_8h.html#autotoc_md31',1,'']]],
+  ['lines_3',['Collection Zone Guide Lines',['../_cam_controller_8h.html#autotoc_md10',1,'']]],
+  ['logic_4',['High-Level Brain Logic',['../index.html#brain_logic_sec',1,'']]]
 ];

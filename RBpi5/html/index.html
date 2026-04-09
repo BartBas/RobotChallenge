@@ -5,7 +5,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=11"/>
 <meta name="generator" content="Doxygen 1.16.1"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Robot Challange: Main Page</title>
+<title>Robot Challange: Project Title: Robot Challenge: Cup Retriever</title>
 <link href="tabs.css" rel="stylesheet" type="text/css"/>
 <script type="text/javascript" src="jquery.js"></script>
 <script type="text/javascript" src="dynsections.js"></script>
@@ -88,10 +88,137 @@ $(function(){initNavTree('index.html','',''); });
 </div>
 </div>
 
-<div class="header">
-  <div class="headertitle"><div class="title">Robot Challange Documentation</div></div>
+<div><div class="header">
+  <div class="headertitle"><div class="title">Project Title: Robot Challenge: Cup Retriever </div></div>
 </div><!--header-->
 <div class="contents">
+<div class="textblock"><h1 class="doxsection"><a class="anchor" id="intro_sec"></a>
+Introduction</h1>
+<p>This is the documentation for the Robot Challenge: Cup Retriever. This project utilizes a dual-controller architecture to autonomously identify, navigate toward, and collect "used" cups using a custom 4WD chassis.</p>
+<h1 class="doxsection"><a class="anchor" id="arch_sec"></a>
+Repository &amp; System Architecture</h1>
+<p>The project is organized into two primary functional layers:</p><ul>
+<li><b><code>/RBpi5</code> (The <a class="el" href="class_brain.html">Brain</a>):</b> High-level logic running on a Raspberry Pi 5. It handles computer vision via the Pi Camera Module 3, spatial mapping via LiDAR, and sends movement commands to the Arduino.</li>
+<li><b><code>/ArduinoMotorController</code> (The Brawn):</b> Firmware for the Arduino "actuator driver." It interfaces with the Motor Shield v5.6 to control the 4WD chassis and handles low-level hardware interrupts.</li>
+</ul>
+<h1 class="doxsection"><a class="anchor" id="functional_sec"></a>
+Core Functionalities</h1>
+<h2 class="doxsection"><a class="anchor" id="perception_sub"></a>
+Perception &amp; Mapping</h2>
+<ul>
+<li><b>Visual Recognition:</b> Uses the Raspberry Pi Camera Module 3 to identify cup geometry and color markers.</li>
+<li><b>Spatial Awareness:</b> Employs the <b>EAI YDLIDAR X4-PRO</b> for 360-degree obstacle detection and environment mapping.</li>
+</ul>
+<h2 class="doxsection"><a class="anchor" id="logic_sub"></a>
+Command &amp; Control</h2>
+<ul>
+<li><b>Communication:</b> High-level pathfinding decisions are translated into drive commands and sent from the Pi 5 to the Arduino via Serial communication.</li>
+<li><b>Drive System:</b> The Arduino processes these commands to manage the 4WD motors, ensuring smooth acceleration and directional control.</li>
+</ul>
+<h1 class="doxsection"><a class="anchor" id="protocol_sec"></a>
+Communication Protocol</h1>
+<p>The Raspberry Pi 5 communicates with the Arduino over Serial using a custom 4-byte bit-packed protocol. Every transmission starts with a <b>Sync Byte (0xFF)</b>.</p>
+<h2 class="doxsection"><a class="anchor" id="packet_format"></a>
+Packet Format</h2>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadLeft">Byte  </th><th class="markdownTableHeadLeft">Bits  </th><th class="markdownTableHeadLeft">Field  </th><th class="markdownTableHeadLeft">Description  </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft">0  </td><td class="markdownTableBodyLeft">0-7  </td><td class="markdownTableBodyLeft"><b>Sync</b>  </td><td class="markdownTableBodyLeft">Always 0xFF; identifies start of frame.  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft">1  </td><td class="markdownTableBodyLeft">16-23  </td><td class="markdownTableBodyLeft"><b>MSB</b>  </td><td class="markdownTableBodyLeft">Bits 16-19: Command Enable and Direction (High).  </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft">2  </td><td class="markdownTableBodyLeft">8-15  </td><td class="markdownTableBodyLeft"><b>MID</b>  </td><td class="markdownTableBodyLeft">Bits 8-15: Direction (Low) and Turn state.  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft">3  </td><td class="markdownTableBodyLeft">0-7  </td><td class="markdownTableBodyLeft"><b>LSB</b>  </td><td class="markdownTableBodyLeft">Bits 0-7: Speed and Pickup trigger.  </td></tr>
+</table>
+<h2 class="doxsection"><a class="anchor" id="bit_mapping"></a>
+Bit-Level Mapping (Inside the 24-bit payload)</h2>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadLeft">Bit(s)  </th><th class="markdownTableHeadLeft">Function  </th><th class="markdownTableHeadLeft">Description  </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>19</b>  </td><td class="markdownTableBodyLeft">Enable  </td><td class="markdownTableBodyLeft">1 = Enable motors, 0 = Disable/Safety cut-off.  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft"><b>10-18</b>  </td><td class="markdownTableBodyLeft">Direction  </td><td class="markdownTableBodyLeft">9-bit value (0-511) mapping heading/orientation.  </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>8-9</b>  </td><td class="markdownTableBodyLeft">Turn  </td><td class="markdownTableBodyLeft">2-bit state: 00=Straight, 01=Left, 10=Right.  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft"><b>1-7</b>  </td><td class="markdownTableBodyLeft">Speed  </td><td class="markdownTableBodyLeft">7-bit PWM/Velocity value (0-127).  </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>0</b>  </td><td class="markdownTableBodyLeft">Pickup  </td><td class="markdownTableBodyLeft">1 = Trigger cup collection mechanism.  </td></tr>
+</table>
+<dl class="section note"><dt>Note</dt><dd>The Raspberry Pi constructs this using bitwise OR operations and shifts before splitting the 32-bit integer into a 4-byte array for Serial transmission.</dd></dl>
+<h2 class="doxsection"><a class="anchor" id="brain_logic_sec"></a>
+High-Level Brain Logic</h2>
+<p>The robot operates on a priority-based state machine. Decisions are made in the following order:</p><ul>
+<li>1. <b>IDLE (E-Stop):</b> Immediate halt if E-stop is active.</li>
+<li>2. <b>AVOID:</b> If LiDAR detects an obstacle closer than <code>brainClearDist</code>, the robot reverses and turns.</li>
+<li>3. <b>SEEK:</b> If no cup is found, the robot spins in place to scan the area.</li>
+<li>4. <b>CHASE:</b> If a cup is seen but far away, the robot steers toward it.</li>
+<li>5. <b>COLLECT (Phase A):</b> If a cup is close enough, the robot aligns (sidesteps) for the pickup.</li>
+<li>6. <b>COLLECT (Phase B):</b> If the robot is in its "blind" drive-over phase, it ignores sensors until the move completes.</li>
+</ul>
+<h2 class="doxsection"><a class="anchor" id="collect_sub"></a>
+The Collection Sequence</h2>
+<p>When a cup is identified as "within range," the robot executes a three-phase sequence:</p><ul>
+<li><b>Phase A (SIDESTEP):</b> Strafing horizontally until the cup is centered in the capture window.</li>
+<li><b>Phase B (DRIVE_OVER):</b> A timed, "committed" forward drive where the camera lose sight of the cup as it enters the collection mechanism.</li>
+<li><b>Phase C (DONE):</b> Logic reset to prepare for the next search.</li>
+</ul>
+<h2 class="doxsection"><a class="anchor" id="protocol_sec"></a>
+Communication Protocol</h2>
+<p>The Raspberry Pi 5 communicates with the Arduino over Serial using a 4-byte packet:</p><ul>
+<li><b>Byte 0:</b> Sync Byte (<code>0xFF</code>)</li>
+<li><b>Byte 1-3:</b> 24-bit Payload (Enable, Direction, Turn, Speed, and Pickup bits).</li>
+<li></li>
+</ul>
+<h2 class="doxsection"><a class="anchor" id="mapping_sub"></a>
+Direction Convention</h2>
+<p>All directions between 0 and 361 are valid and the robot will move/ strafe into that direction. For reference: </p><table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadLeft">Value  </th><th class="markdownTableHeadLeft">Direction  </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>0</b>  </td><td class="markdownTableBodyLeft">Standstill (used for turning)  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft"><b>360</b>  </td><td class="markdownTableBodyLeft">Forward (Dead-zone bypass)  </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>90</b>  </td><td class="markdownTableBodyLeft">Right (strafe)  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft"><b>180</b>  </td><td class="markdownTableBodyLeft">Backward  </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>270</b>  </td><td class="markdownTableBodyLeft">Left (Strafe)  </td></tr>
+</table>
+<h1 class="doxsection"><a class="anchor" id="hardware_sec"></a>
+Hardware Stack</h1>
+<table class="markdownTable">
+<tr class="markdownTableHead">
+<th class="markdownTableHeadLeft">Component  </th><th class="markdownTableHeadLeft">Specification  </th></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>Controller</b>  </td><td class="markdownTableBodyLeft">Raspberry Pi 5  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft"><b>Microcontroller</b>  </td><td class="markdownTableBodyLeft">Arduino (with Motor Shield v5.6)  </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>Vision</b>  </td><td class="markdownTableBodyLeft">Raspberry Pi Camera Module 3  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft"><b>LIDAR</b>  </td><td class="markdownTableBodyLeft">EAI YDLIDAR X4-PRO  </td></tr>
+<tr class="markdownTableRowOdd">
+<td class="markdownTableBodyLeft"><b>Chassis</b>  </td><td class="markdownTableBodyLeft">4WD Custom Build  </td></tr>
+<tr class="markdownTableRowEven">
+<td class="markdownTableBodyLeft"><b>Power</b>  </td><td class="markdownTableBodyLeft">ParkSide 12V Battery  </td></tr>
+</table>
+<h1 class="doxsection"><a class="anchor" id="install_sec"></a>
+Installation</h1>
+<h2 class="doxsection"><a class="anchor" id="step1"></a>
+Step 1: Environment Setup</h2>
+<p>Use the makefile <code>'make</code> env' to download and create all necessary libraries and dependencies. </p>
+<h2 class="doxsection"><a class="anchor" id="step2"></a>
+Step 2: Compilation</h2>
+<p>Use the makefile <code>'make</code> build' to compile the C++/Arduino source code. </p>
+<h2 class="doxsection"><a class="anchor" id="step3"></a>
+Step 3: Execution</h2>
+<p>Use the makefile <code>'make</code> run' to initialize the sensor array and start the control loop. </p>
+</div></div><!-- PageDoc -->
 <a href="doxygen_crawl.html"></a>
 </div><!-- contents -->
 </div><!-- doc-content -->

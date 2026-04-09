@@ -1,5 +1,5 @@
 var searchData=
 [
-  ['behaviour_0',['Flush Behaviour',['../_motor_controller_8cpp.html#autotoc_md39',1,'']]],
-  ['bresenham_20raycasting_1',['Bresenham Raycasting',['../_map_controller_8cpp.html#autotoc_md29',1,'']]]
+  ['24_20bit_20payload_0',['Bit-Level Mapping (Inside the 24-bit payload)',['../index.html#bit_mapping',1,'']]],
+  ['2_3a_20compilation_1',['Step 2: Compilation',['../index.html#step2',1,'']]]
 ];

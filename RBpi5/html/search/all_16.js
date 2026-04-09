@@ -1,5 +1,5 @@
 var searchData=
 [
-  ['y_0',['y',['../struct_pose2_d.html#a79a6b7de45208d23daa4ec11913a547f',1,'Pose2D']]],
-  ['yaw_1',['yaw',['../struct_pose2_d.html#a1e4b62169c2d1571e29690668ccc22ba',1,'Pose2D']]]
+  ['voxel_20filter_0',['Voxel Filter',['../_map_controller_8cpp.html#autotoc_md28',1,'']]],
+  ['voxelfiltercloud_1',['voxelFilterCloud',['../class_map_controller.html#a3a697a6cad24c5b4178c5b940092bfa3',1,'MapController']]]
 ];

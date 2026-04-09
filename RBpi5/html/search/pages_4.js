@@ -1,7 +1,8 @@
 var searchData=
 [
-  ['each_20scan_0',['Filtering Applied to Each Scan',['../_lidar_controller_8h.html#autotoc_md24',1,'']]],
-  ['elevated_20object_20filter_1',['Elevated-Object Filter',['../_cam_controller_8h.html#autotoc_md9',1,'']]],
-  ['encoding_20sendpacket_2',['Packet Encoding (&lt;span class=&quot;tt&quot;&gt;sendPacket&lt;/span&gt;)',['../_motor_controller_8cpp.html#autotoc_md38',1,'']]],
-  ['error_20handling_3',['Error Handling',['../_config_8cpp.html#autotoc_md15',1,'']]]
+  ['behaviour_0',['Flush Behaviour',['../_motor_controller_8cpp.html#autotoc_md39',1,'']]],
+  ['bit_20level_20mapping_20inside_20the_2024_20bit_20payload_1',['Bit-Level Mapping (Inside the 24-bit payload)',['../index.html#bit_mapping',1,'']]],
+  ['bit_20payload_2',['Bit-Level Mapping (Inside the 24-bit payload)',['../index.html#bit_mapping',1,'']]],
+  ['brain_20logic_3',['High-Level Brain Logic',['../index.html#brain_logic_sec',1,'']]],
+  ['bresenham_20raycasting_4',['Bresenham Raycasting',['../_map_controller_8cpp.html#autotoc_md29',1,'']]]
 ];

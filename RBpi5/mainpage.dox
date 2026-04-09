@@ -1,0 +1,105 @@
+/**
+ * \mainpage Project Title: Robot Challenge: Cup Retriever
+ *
+ * \section intro_sec Introduction
+ * This is the documentation for the Robot Challenge: Cup Retriever. This project utilizes a 
+ * dual-controller architecture to autonomously identify, navigate toward, and collect 
+ * "used" cups using a custom 4WD chassis.
+ *
+ * \section arch_sec Repository & System Architecture
+ * The project is organized into two primary functional layers:
+ * - **\c /RBpi5 (The Brain):** High-level logic running on a Raspberry Pi 5. It handles 
+ * computer vision via the Pi Camera Module 3, spatial mapping via LiDAR, and sends 
+ * movement commands to the Arduino.
+ * - **\c /ArduinoMotorController (The Brawn):** Firmware for the Arduino "actuator driver." 
+ * It interfaces with the Motor Shield v5.6 to control the 4WD chassis and handles 
+ * low-level hardware interrupts.
+ *
+ * \section functional_sec Core Functionalities
+ * \subsection perception_sub Perception & Mapping
+ * - **Visual Recognition:** Uses the Raspberry Pi Camera Module 3 to identify cup 
+ * geometry and color markers.
+ * - **Spatial Awareness:** Employs the **EAI YDLIDAR X4-PRO** for 360-degree obstacle 
+ * detection and environment mapping.
+ *
+ * \subsection logic_sub Command & Control
+ * - **Communication:** High-level pathfinding decisions are translated into drive 
+ * commands and sent from the Pi 5 to the Arduino via Serial communication.
+ * - **Drive System:** The Arduino processes these commands to manage the 4WD motors, 
+ * ensuring smooth acceleration and directional control.
+ *
+ * \section protocol_sec Communication Protocol
+ * The Raspberry Pi 5 communicates with the Arduino over Serial using a custom 4-byte 
+ * bit-packed protocol. Every transmission starts with a **Sync Byte (0xFF)**.
+ *
+ * \subsection packet_format Packet Format
+ *
+ * | Byte | Bits | Field | Description |
+ * | :--- | :--- | :--- | :--- |
+ * | 0 | 0-7 | **Sync** | Always 0xFF; identifies start of frame. |
+ * | 1 | 16-23 | **MSB** | Bits 16-19: Command Enable and Direction (High). |
+ * | 2 | 8-15 | **MID** | Bits 8-15: Direction (Low) and Turn state. |
+ * | 3 | 0-7 | **LSB** | Bits 0-7: Speed and Pickup trigger. |
+ *
+ * \subsection bit_mapping Bit-Level Mapping (Inside the 24-bit payload)
+ *
+ * | Bit(s) | Function | Description |
+ * | :--- | :--- | :--- |
+ * | **19** | Enable | 1 = Enable motors, 0 = Disable/Safety cut-off. |
+ * | **10-18** | Direction | 9-bit value (0-511) mapping heading/orientation. |
+ * | **8-9** | Turn | 2-bit state: 00=Straight, 01=Left, 10=Right. |
+ * | **1-7** | Speed | 7-bit PWM/Velocity value (0-127). |
+ * | **0** | Pickup | 1 = Trigger cup collection mechanism. |
+ *
+ * \note The Raspberry Pi constructs this using bitwise OR operations and shifts 
+ * before splitting the 32-bit integer into a 4-byte array for Serial transmission.
+ *
+ *
+ * \subsection brain_logic_sec High-Level Brain Logic
+ * The robot operates on a priority-based state machine. Decisions are made in the following order:
+ * * 1. **IDLE (E-Stop):** Immediate halt if E-stop is active.
+ * * 2. **AVOID:** If LiDAR detects an obstacle closer than \c brainClearDist, the robot reverses and turns.
+ * * 3. **SEEK:** If no cup is found, the robot spins in place to scan the area.
+ * * 4. **CHASE:** If a cup is seen but far away, the robot steers toward it.
+ * * 5. **COLLECT (Phase A):** If a cup is close enough, the robot aligns (sidesteps) for the pickup.
+ * * 6. **COLLECT (Phase B):** If the robot is in its "blind" drive-over phase, it ignores sensors until the move completes.
+ *
+ * \subsection collect_sub The Collection Sequence
+ * When a cup is identified as "within range," the robot executes a three-phase sequence:
+ * - **Phase A (SIDESTEP):** Strafing horizontally until the cup is centered in the capture window.
+ * - **Phase B (DRIVE_OVER):** A timed, "committed" forward drive where the camera lose sight of the cup as it enters the collection mechanism.
+ * - **Phase C (DONE):** Logic reset to prepare for the next search.
+ *
+ * \subsection protocol_sec Communication Protocol
+ * The Raspberry Pi 5 communicates with the Arduino over Serial using a 4-byte packet:
+ * - **Byte 0:** Sync Byte (\c 0xFF)
+ * - **Byte 1-3:** 24-bit Payload (Enable, Direction, Turn, Speed, and Pickup bits).
+ * * \subsection mapping_sub Direction Convention
+ * All directions between 0 and 360 are valid and the robot will move/ strafe into that direction. For reference:
+ * | Value | Direction |
+ * | :--- | :--- |
+ * | **0** | Standstill (used for turning) |
+ * | **360** | Forward (Dead-zone bypass) |
+ * | **90** | Right (strafe) |
+ * | **180** | Backward |
+ * | **270** | Left (Strafe) |
+ *
+ * \section hardware_sec Hardware Stack
+ *
+ * | Component | Specification |
+ * | :--- | :--- |
+ * | **Controller** | Raspberry Pi 5 |
+ * | **Microcontroller** | Arduino (with Motor Shield v5.6) |
+ * | **Vision** | Raspberry Pi Camera Module 3 |
+ * | **LIDAR** | EAI YDLIDAR X4-PRO |
+ * | **Chassis** | 4WD Custom Build |
+ * | **Power** | ParkSide 12V Battery |
+ *
+ * \section install_sec Installation
+ * \subsection step1 Step 1: Environment Setup
+ * Use the makefile \c 'make env' to download and create all necessary libraries and dependencies.
+ * \subsection step2 Step 2: Compilation
+ * Use the makefile \c 'make build' to compile the C++/Arduino source code.
+ * \subsection step3 Step 3: Execution
+ * Use the makefile \c 'make run' to initialize the sensor array and start the control loop.
+ */

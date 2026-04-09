@@ -1,19 +1,9 @@
 var searchData=
 [
-  ['safety_0',['Safety',['../_cam_controller_8h.html#autotoc_md12',1,'Thread Safety'],['../_lidar_controller_8cpp.html#autotoc_md22',1,'Thread Safety'],['../_map_controller_8h.html#autotoc_md35',1,'Thread Safety']]],
-  ['scan_1',['Filtering Applied to Each Scan',['../_lidar_controller_8h.html#autotoc_md24',1,'']]],
-  ['scan_2',['Update Cycle (called once per lidar scan)',['../_map_controller_8h.html#autotoc_md31',1,'']]],
-  ['scan_20icp_3',['Odometry — Scan-to-Scan ICP',['../_map_controller_8h.html#autotoc_md32',1,'']]],
-  ['scan_20retrieval_20getlatestscan_4',['Scan Retrieval (&lt;span class=&quot;tt&quot;&gt;getLatestScan&lt;/span&gt;)',['../_lidar_controller_8cpp.html#autotoc_md21',1,'']]],
-  ['scan_20to_20scan_20icp_5',['Odometry — Scan-to-Scan ICP',['../_map_controller_8h.html#autotoc_md32',1,'']]],
-  ['sendpacket_6',['Packet Encoding (&lt;span class=&quot;tt&quot;&gt;sendPacket&lt;/span&gt;)',['../_motor_controller_8cpp.html#autotoc_md38',1,'']]],
-  ['sequence_7',['Initialisation Sequence',['../_lidar_controller_8cpp.html#autotoc_md20',1,'']]],
-  ['serial_20configuration_8',['Serial Configuration',['../_motor_controller_8h.html#autotoc_md42',1,'']]],
-  ['serial_20initialisation_9',['Serial Initialisation',['../_motor_controller_8cpp.html#autotoc_md37',1,'']]],
-  ['state_20machine_20overview_10',['State Machine Overview',['../_brain_8h.html#autotoc_md0',1,'']]],
-  ['strategies_11',['Tracking Strategies',['../_cam_controller_8h.html#autotoc_md8',1,'']]],
-  ['strategy_12',['ICP Downsample Strategy',['../_map_controller_8cpp.html#autotoc_md27',1,'']]],
-  ['streaming_13',['MJPEG Streaming',['../_cam_controller_8h.html#autotoc_md11',1,'']]],
-  ['structs_14',['Structs',['../_config_8h.html#autotoc_md16',1,'']]],
-  ['sub_20phases_15',['COLLECT Sub-phases',['../_brain_8h.html#autotoc_md1',1,'']]]
+  ['object_20filter_0',['Elevated-Object Filter',['../_cam_controller_8h.html#autotoc_md9',1,'']]],
+  ['occupancy_20grid_1',['Occupancy Grid',['../_map_controller_8h.html#autotoc_md33',1,'']]],
+  ['odometry_20—_20scan_20to_20scan_20icp_2',['Odometry — Scan-to-Scan ICP',['../_map_controller_8h.html#autotoc_md32',1,'']]],
+  ['once_20per_20lidar_20scan_3',['Update Cycle (called once per lidar scan)',['../_map_controller_8h.html#autotoc_md31',1,'']]],
+  ['order_20highest_20first_4',['Priority Order (highest first)',['../_brain_8h.html#autotoc_md2',1,'']]],
+  ['overview_5',['Overview',['../_cam_controller_8h.html#autotoc_md6',1,'Pipeline Overview'],['../_brain_8h.html#autotoc_md0',1,'State Machine Overview']]]
 ];

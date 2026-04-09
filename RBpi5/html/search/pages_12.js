@@ -1,4 +1,25 @@
 var searchData=
 [
-  ['voxel_20filter_0',['Voxel Filter',['../_map_controller_8cpp.html#autotoc_md28',1,'']]]
+  ['safety_0',['Safety',['../_cam_controller_8h.html#autotoc_md12',1,'Thread Safety'],['../_lidar_controller_8cpp.html#autotoc_md22',1,'Thread Safety'],['../_map_controller_8h.html#autotoc_md35',1,'Thread Safety']]],
+  ['scan_1',['Filtering Applied to Each Scan',['../_lidar_controller_8h.html#autotoc_md24',1,'']]],
+  ['scan_2',['Update Cycle (called once per lidar scan)',['../_map_controller_8h.html#autotoc_md31',1,'']]],
+  ['scan_20icp_3',['Odometry — Scan-to-Scan ICP',['../_map_controller_8h.html#autotoc_md32',1,'']]],
+  ['scan_20retrieval_20getlatestscan_4',['Scan Retrieval (&lt;span class=&quot;tt&quot;&gt;getLatestScan&lt;/span&gt;)',['../_lidar_controller_8cpp.html#autotoc_md21',1,'']]],
+  ['scan_20to_20scan_20icp_5',['Odometry — Scan-to-Scan ICP',['../_map_controller_8h.html#autotoc_md32',1,'']]],
+  ['sendpacket_6',['Packet Encoding (&lt;span class=&quot;tt&quot;&gt;sendPacket&lt;/span&gt;)',['../_motor_controller_8cpp.html#autotoc_md38',1,'']]],
+  ['sequence_7',['Sequence',['../_lidar_controller_8cpp.html#autotoc_md20',1,'Initialisation Sequence'],['../index.html#collect_sub',1,'The Collection Sequence']]],
+  ['serial_20configuration_8',['Serial Configuration',['../_motor_controller_8h.html#autotoc_md42',1,'']]],
+  ['serial_20initialisation_9',['Serial Initialisation',['../_motor_controller_8cpp.html#autotoc_md37',1,'']]],
+  ['setup_10',['Step 1: Environment Setup',['../index.html#step1',1,'']]],
+  ['stack_11',['Hardware Stack',['../index.html#hardware_sec',1,'']]],
+  ['state_20machine_20overview_12',['State Machine Overview',['../_brain_8h.html#autotoc_md0',1,'']]],
+  ['step_201_3a_20environment_20setup_13',['Step 1: Environment Setup',['../index.html#step1',1,'']]],
+  ['step_202_3a_20compilation_14',['Step 2: Compilation',['../index.html#step2',1,'']]],
+  ['step_203_3a_20execution_15',['Step 3: Execution',['../index.html#step3',1,'']]],
+  ['strategies_16',['Tracking Strategies',['../_cam_controller_8h.html#autotoc_md8',1,'']]],
+  ['strategy_17',['ICP Downsample Strategy',['../_map_controller_8cpp.html#autotoc_md27',1,'']]],
+  ['streaming_18',['MJPEG Streaming',['../_cam_controller_8h.html#autotoc_md11',1,'']]],
+  ['structs_19',['Structs',['../_config_8h.html#autotoc_md16',1,'']]],
+  ['sub_20phases_20',['COLLECT Sub-phases',['../_brain_8h.html#autotoc_md1',1,'']]],
+  ['system_20architecture_21',['Repository &amp;amp; System Architecture',['../index.html#arch_sec',1,'']]]
 ];
